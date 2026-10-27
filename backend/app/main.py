@@ -54,6 +54,7 @@ class SummaryParams:
         group_by: str = "REGION",
         metric: str = "UnblendedCost",
         include_discounts: bool = False,
+        include_nat_volume: bool = False,
         filters: Annotated[list[str], Query(alias="filter", description="Repeatable DIM=value, e.g. REGION=us-east-1")] = [],
     ):
         self.period = period
@@ -62,11 +63,19 @@ class SummaryParams:
         self.group_by = group_by
         self.metric = metric
         self.include_discounts = include_discounts
+        self.include_nat_volume = include_nat_volume
         self.filters = filters
 
     def run(self, service: DtoService) -> Summary:
         return service.summary(
-            self.period, self.start, self.end, self.group_by, parse_filters(self.filters), self.metric, self.include_discounts
+            self.period,
+            self.start,
+            self.end,
+            self.group_by,
+            parse_filters(self.filters),
+            self.metric,
+            self.include_discounts,
+            self.include_nat_volume,
         )
 
 

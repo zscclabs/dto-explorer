@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- "Include NAT volume" switch (`include_nat_volume` API parameter) to add NAT Gateway data processed back into volume figures.
+- Egress volume (`egress_gb`, `prev_egress_gb`): Internet Out, Inter-Region and Other Out only, shown under "Data transferred".
+- Inter-AZ, NAT Gateway and To CloudFront are labelled as transit in the volume charts (`transit_types` in `/api/meta`).
+
+### Fixed
+- Data volume no longer double-counts NAT Gateway traffic: NAT data processing bytes are excluded from volume by default (their cost is still counted), and the effective rate leaves NAT cost out when its volume is excluded.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added

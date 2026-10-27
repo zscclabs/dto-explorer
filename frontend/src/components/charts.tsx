@@ -87,7 +87,12 @@ export function TrendChart({ data, title }: { data: Summary | null; title: strin
   );
 }
 
-export function VolumeChart({ data }: { data: Summary | null }) {
+/** Legend label that marks types moving data inside AWS, whose volume duplicates or doubles egress. */
+function typeLabel(type: string, transitTypes: string[]): string {
+  return transitTypes.includes(type) ? `${type} (transit)` : type;
+}
+
+export function VolumeChart({ data, transitTypes }: { data: Summary | null; transitTypes: string[] }) {
   const height = 300;
   if (!data) return <Skeleton variant="rounded" height={height + 76} />;
 
@@ -105,7 +110,7 @@ export function VolumeChart({ data }: { data: Summary | null }) {
 
   const series = types.map((t) => ({
     id: t,
-    label: t,
+    label: typeLabel(t, transitTypes),
     color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR,
     stack: 'total',
     valueFormatter: fmt,
@@ -135,10 +140,13 @@ export function VolumeChart({ data }: { data: Summary | null }) {
           borderRadius={4}
         />
       )}
-      {types.includes('NAT Gateway') && (
+      {types.some((t) => transitTypes.includes(t)) && (
         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>
-          NAT Gateway volume is data processed by the gateway; traffic leaving through it to the internet is also counted
-          under Internet Out.
+          Transit types move data inside AWS. Inter-AZ is billed on both the sending and receiving side, so it shows about
+          2× the bytes moved.{' '}
+          {data.include_nat_volume
+            ? 'NAT Gateway volume duplicates the egress it carries.'
+            : 'NAT Gateway volume is left out because it duplicates the egress it carries (switch: Include NAT volume).'}
         </Typography>
       )}
     </Paper>
@@ -161,14 +169,14 @@ export function BreakdownChart({ data, title }: { data: Summary | null; title: s
   return <Donut title={title} items={items} height={height} format={(v) => money(v, data.currency)} />;
 }
 
-export function VolumeShareChart({ data }: { data: Summary | null }) {
+export function VolumeShareChart({ data, transitTypes }: { data: Summary | null; transitTypes: string[] }) {
   const height = 300;
   if (!data) return <Skeleton variant="rounded" height={height + 76} />;
 
   const items = Object.entries(data.by_type)
     .filter(([, a]) => a.gb > 0)
     .sort(([, a], [, b]) => b.gb - a.gb)
-    .map(([t, a]) => ({ id: t, label: t, color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR, value: a.gb }));
+    .map(([t, a]) => ({ id: t, label: typeLabel(t, transitTypes), color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR, value: a.gb }));
 
   return <Donut title="Data volume share by transfer type" items={items} height={height} format={bytes} />;
 }

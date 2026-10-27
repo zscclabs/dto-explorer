@@ -13,6 +13,7 @@ export interface Meta {
   tag_keys: string[];
   cost_categories: string[];
   transfer_types: string[];
+  transit_types: string[]; // move data inside AWS rather than out of it
   group_by_options: Option[];
   metrics: Option[];
   default_tag_key: string | null;
@@ -42,11 +43,14 @@ export interface Summary {
   group_by: string;
   metric: string;
   include_discounts: boolean;
+  include_nat_volume: boolean;
   currency: string;
   total_cost: number;
   total_gb: number;
+  egress_gb: number; // bytes leaving AWS or crossing regions
   prev_total_cost: number | null;
   prev_total_gb: number | null;
+  prev_egress_gb: number | null;
   by_type: Record<string, { cost: number; gb: number }>;
   rows: Row[];
   series: { date: string; values: Record<string, number> }[];
@@ -62,6 +66,7 @@ export interface Query {
   groupBy: string;
   metric: string;
   includeDiscounts: boolean;
+  includeNatVolume: boolean;
   filters: Filters;
 }
 
@@ -70,6 +75,7 @@ export function toSearchParams(q: Query): URLSearchParams {
   if (q.start) p.set('start', q.start);
   if (q.end && q.period === 'custom') p.set('end', q.end);
   if (q.includeDiscounts) p.set('include_discounts', 'true');
+  if (q.includeNatVolume) p.set('include_nat_volume', 'true');
   for (const [dim, values] of Object.entries(q.filters)) {
     for (const v of values) p.append('filter', `${dim}=${v}`);
   }

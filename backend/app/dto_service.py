@@ -17,6 +17,11 @@ NAT_GATEWAY = "NAT Gateway"
 TO_CLOUDFRONT = "To CloudFront"
 OTHER_OUT = "Other Out"
 TRANSFER_TYPES = [INTERNET_OUT, INTER_REGION, INTER_AZ, NAT_GATEWAY, TO_CLOUDFRONT, OTHER_OUT]
+# Bytes leaving AWS or crossing regions. The other types move data inside AWS and their bytes reappear under
+# an egress type: NAT data processing and origin fetches to CloudFront duplicate the egress they carry, and
+# Inter-AZ is billed on both the sending and the receiving side.
+EGRESS_TYPES = [INTERNET_OUT, INTER_REGION, OTHER_OUT]
+TRANSIT_TYPES = [INTER_AZ, NAT_GATEWAY, TO_CLOUDFRONT]
 
 # Usage types are "<region prefix>-<kind>", the prefix is omitted for some us-east-1 usage.
 _P = r"(?:[A-Z0-9]+-)?"
@@ -102,6 +107,11 @@ def classify(usage_type: str) -> str | None:
     return None
 
 
+def counted_gb(kind: str, gb: float, include_nat_volume: bool) -> float:
+    """Volume to count for a group: NAT bytes are a processing fee on traffic billed elsewhere, so 0 unless asked for."""
+    return gb if include_nat_volume or kind != NAT_GATEWAY else 0.0
+
+
 def parse_filters(raw: list[str]) -> dict[str, list[str]]:
     """Parse repeated `DIM=value` strings into {DIM: [values]} (OR within, AND across)."""
     out: dict[str, list[str]] = defaultdict(list)
@@ -183,6 +193,7 @@ class DtoService:
         filters: dict[str, list[str]],
         metric: str = "UnblendedCost",
         include_discounts: bool = False,
+        include_nat_volume: bool = False,
         today: date | None = None,
     ) -> Summary:
         _validate_dimension(group_by)
@@ -193,8 +204,10 @@ class DtoService:
         except ValueError as e:
             raise DtoQueryError(str(e)) from e
 
-        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), metric, include_discounts, resolved.query.end)
-        return self.cache.get_or_set(key, lambda: self._summary(period, resolved, group_by, filters, metric, include_discounts))
+        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), metric, include_discounts, include_nat_volume, resolved.query.end)
+        return self.cache.get_or_set(
+            key, lambda: self._summary(period, resolved, group_by, filters, metric, include_discounts, include_nat_volume)
+        )
 
     def _summary(
         self,
@@ -204,6 +217,7 @@ class DtoService:
         filters: dict[str, list[str]],
         metric: str,
         include_discounts: bool,
+        include_nat_volume: bool,
     ) -> Summary:
         q = resolved.query
         result = Summary(
@@ -214,11 +228,14 @@ class DtoService:
             group_by=group_by,
             metric=metric,
             include_discounts=include_discounts,
+            include_nat_volume=include_nat_volume,
             currency="USD",
             total_cost=0.0,
             total_gb=0.0,
+            egress_gb=0.0,
             prev_total_cost=None,
             prev_total_gb=None,
+            prev_egress_gb=None,
             by_type={t: Amount() for t in TRANSFER_TYPES},
             rows=[],
             series=[],
@@ -263,7 +280,7 @@ class DtoService:
                 if kind is None:
                     continue
                 cost = float(g["Metrics"][metric]["Amount"])
-                gb = float(g["Metrics"]["UsageQuantity"]["Amount"])
+                gb = counted_gb(kind, float(g["Metrics"]["UsageQuantity"]["Amount"]), include_nat_volume)
                 result.currency = g["Metrics"][metric].get("Unit", result.currency)
 
                 if group_by == "TRANSFER_TYPE":
@@ -280,11 +297,14 @@ class DtoService:
                 row.gb += gb
                 row.by_type[kind] = row.by_type.get(kind, 0.0) + cost
                 bucket[gkey] += cost
-                vbucket[kind] += gb
+                if gb:
+                    vbucket[kind] += gb
                 result.by_type[kind].cost += cost
                 result.by_type[kind].gb += gb
                 result.total_cost += cost
                 result.total_gb += gb
+                if kind in EGRESS_TYPES:
+                    result.egress_gb += gb
 
         for row in rows.values():
             row.pct = row.cost / result.total_cost * 100 if result.total_cost else 0.0
@@ -292,21 +312,43 @@ class DtoService:
         result.series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(series.items())]
         result.volume_series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(volume.items())]
 
-        result.prev_total_cost, result.prev_total_gb = self._previous_totals(resolved.previous, filters, metric, include_discounts)
+        result.prev_total_cost, result.prev_total_gb, result.prev_egress_gb = self._previous_totals(
+            resolved.previous, filters, metric, include_discounts, include_nat_volume
+        )
         return result
 
     def _previous_totals(
-        self, w: periods.Window, filters: dict[str, list[str]], metric: str, include_discounts: bool
-    ) -> tuple[float, float]:
+        self,
+        w: periods.Window,
+        filters: dict[str, list[str]],
+        metric: str,
+        include_discounts: bool,
+        include_nat_volume: bool,
+    ) -> tuple[float, float, float]:
+        """(cost, counted GB, egress GB) for the window. Grouped by usage type so volume follows the same rules."""
         usage_types = self._filtered_usage_types(w.start, w.end, filters)
         if not usage_types:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
         results, _ = self.ce.cost_and_usage(
-            w.start, w.end, "MONTHLY", [metric, "UsageQuantity"], self._filter_expr(usage_types, filters, include_discounts)
+            w.start,
+            w.end,
+            "MONTHLY",
+            [metric, "UsageQuantity"],
+            self._filter_expr(usage_types, filters, include_discounts),
+            [{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
         )
-        cost = sum(float(r.get("Total", {}).get(metric, {}).get("Amount", 0)) for r in results)
-        gb = sum(float(r.get("Total", {}).get("UsageQuantity", {}).get("Amount", 0)) for r in results)
-        return cost, gb
+        cost = gb = egress = 0.0
+        for r in results:
+            for g in r.get("Groups", []):
+                kind = usage_types.get(g["Keys"][0])
+                if kind is None:
+                    continue
+                cost += float(g["Metrics"][metric]["Amount"])
+                counted = counted_gb(kind, float(g["Metrics"]["UsageQuantity"]["Amount"]), include_nat_volume)
+                gb += counted
+                if kind in EGRESS_TYPES:
+                    egress += counted
+        return cost, gb, egress
 
     def _filtered_usage_types(self, start: date, end: date, filters: dict[str, list[str]]) -> dict[str, str]:
         usage_types = self.dto_usage_types(start, end)
@@ -383,6 +425,7 @@ class DtoService:
                 tag_keys=tag_keys,
                 cost_categories=cost_categories,
                 transfer_types=TRANSFER_TYPES,
+                transit_types=TRANSIT_TYPES,
                 group_by_options=group_opts,
                 metrics=[Option(value=k, label=v) for k, v in METRICS.items()],
                 default_tag_key=None,

@@ -33,6 +33,7 @@ interface ViewState extends PeriodValue {
   groupBy: string;
   metric: string;
   includeDiscounts: boolean;
+  includeNatVolume: boolean;
   filters: Filters;
 }
 
@@ -54,6 +55,7 @@ function readUrl(): ViewState {
     groupBy: p.get('group_by') ?? 'REGION',
     metric: p.get('metric') ?? 'UnblendedCost',
     includeDiscounts: p.get('include_discounts') === 'true',
+    includeNatVolume: p.get('include_nat_volume') === 'true',
     filters,
   };
 }
@@ -66,6 +68,7 @@ function toQuery(s: ViewState): Query {
     groupBy: s.groupBy,
     metric: s.metric,
     includeDiscounts: s.includeDiscounts,
+    includeNatVolume: s.includeNatVolume,
     filters: s.filters,
   };
 }
@@ -214,10 +217,12 @@ export default function App() {
                 groupBy={view.groupBy}
                 metric={view.metric}
                 includeDiscounts={view.includeDiscounts}
+                includeNatVolume={view.includeNatVolume}
                 filters={view.filters}
                 onGroupBy={(groupBy) => update({ groupBy })}
                 onMetric={(metric) => update({ metric })}
                 onIncludeDiscounts={(includeDiscounts) => update({ includeDiscounts })}
+                onIncludeNatVolume={(includeNatVolume) => update({ includeNatVolume })}
                 onFilters={(filters) => update({ filters })}
                 valueLabel={valueLabel}
               />
@@ -260,10 +265,10 @@ export default function App() {
               </Grid>
               <Grid container spacing={2.5}>
                 <Grid size={{ xs: 12, lg: 8 }}>
-                  <VolumeChart data={data} />
+                  <VolumeChart data={data} transitTypes={meta?.transit_types ?? []} />
                 </Grid>
                 <Grid size={{ xs: 12, lg: 4 }}>
-                  <VolumeShareChart data={data} />
+                  <VolumeShareChart data={data} transitTypes={meta?.transit_types ?? []} />
                 </Grid>
               </Grid>
               <BreakdownTable

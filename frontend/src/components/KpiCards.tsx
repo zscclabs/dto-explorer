@@ -66,7 +66,10 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
   }
 
   const prevLabel = data.previous_window ? rangeLabel(data.previous_window.start, data.previous_window.end) : '';
-  const perGb = data.total_gb ? data.total_cost / data.total_gb : 0;
+  // NAT cost has no counted volume unless NAT volume is included, so leave it out of $/GB.
+  const natCost = data.include_nat_volume ? 0 : (data.by_type['NAT Gateway']?.cost ?? 0);
+  const perGb = data.total_gb ? (data.total_cost - natCost) / data.total_gb : 0;
+  const egressDelta = deltaPct(data.egress_gb, data.prev_egress_gb);
   const top = data.rows[0];
   const mix = Object.entries(data.by_type).filter(([, a]) => a.cost > 0);
 
@@ -86,7 +89,14 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
             title="Data transferred"
             value={bytes(data.total_gb)}
             delta={<Delta value={deltaPct(data.total_gb, data.prev_total_gb)} previousLabel={prevLabel} />}
-            sub={data.prev_total_gb !== null ? `${bytes(data.prev_total_gb)} previous period` : undefined}
+            sub={
+              <Tooltip title="Egress: Internet Out, Inter-Region and Other Out. The rest is transit inside AWS.">
+                <span>
+                  {bytes(data.egress_gb)} leaving AWS
+                  {egressDelta !== null && ` (${egressDelta >= 0 ? '+' : ''}${egressDelta.toFixed(1)}%)`}
+                </span>
+              </Tooltip>
+            }
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -112,7 +122,7 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
           </Typography>
           <Box sx={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', gap: '2px' }}>
             {mix.map(([type, a]) => (
-              <Tooltip key={type} title={`${type}: ${money(a.cost, data.currency)} · ${bytes(a.gb)}`}>
+              <Tooltip key={type} title={`${type}: ${money(a.cost, data.currency)} · ${type === 'NAT Gateway' && !data.include_nat_volume ? 'volume not counted' : bytes(a.gb)}`}>
                 <Box sx={{ width: `${(a.cost / data.total_cost) * 100}%`, bgcolor: TRANSFER_TYPE_COLORS[type] ?? OTHER_COLOR, minWidth: 3 }} />
               </Tooltip>
             ))}

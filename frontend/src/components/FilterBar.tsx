@@ -21,10 +21,12 @@ interface Props {
   groupBy: string;
   metric: string;
   includeDiscounts: boolean;
+  includeNatVolume: boolean;
   filters: Filters;
   onGroupBy: (value: string) => void;
   onMetric: (value: string) => void;
   onIncludeDiscounts: (value: boolean) => void;
+  onIncludeNatVolume: (value: boolean) => void;
   onFilters: (value: Filters) => void;
   valueLabel: (dim: string, value: string) => string;
 }
@@ -87,10 +89,12 @@ export default function FilterBar({
   groupBy,
   metric,
   includeDiscounts,
+  includeNatVolume,
   filters,
   onGroupBy,
   onMetric,
   onIncludeDiscounts,
+  onIncludeNatVolume,
   onFilters,
   valueLabel,
 }: Props) {
@@ -155,13 +159,22 @@ export default function FilterBar({
             ))}
           </Select>
         </FormControl>
-        <Tooltip title="Off: list-price usage charges only, so every breakdown adds up to 100%. On: net of credits, refunds and EDP / private-rate discounts, which AWS books as negative charges and can show as negative groups.">
-          <FormControlLabel
-            control={<Switch checked={includeDiscounts} onChange={(e) => onIncludeDiscounts(e.target.checked)} />}
-            label="Include discounts & credits"
-            sx={{ whiteSpace: 'nowrap', mr: 0 }}
-          />
-        </Tooltip>
+        <Stack sx={{ justifyContent: 'center' }}>
+          <Tooltip title="Off: list-price usage charges only, so every breakdown adds up to 100%. On: net of credits, refunds and EDP / private-rate discounts, which AWS books as negative charges and can show as negative groups.">
+            <FormControlLabel
+              control={<Switch checked={includeDiscounts} onChange={(e) => onIncludeDiscounts(e.target.checked)} />}
+              label="Include discounts & credits"
+              sx={{ whiteSpace: 'nowrap', mr: 0 }}
+            />
+          </Tooltip>
+          <Tooltip title="NAT Gateway bytes are a processing fee on traffic that is already billed as Internet Out, Inter-Region or Inter-AZ. Off: NAT cost is counted but its volume is not, so data isn't double-counted. On: add NAT volume back to see how much data goes through NAT gateways.">
+            <FormControlLabel
+              control={<Switch checked={includeNatVolume} onChange={(e) => onIncludeNatVolume(e.target.checked)} />}
+              label="Include NAT volume"
+              sx={{ whiteSpace: 'nowrap', mr: 0 }}
+            />
+          </Tooltip>
+        </Stack>
       </Stack>
 
       {(extra.length > 0 || anyFilters) && (
