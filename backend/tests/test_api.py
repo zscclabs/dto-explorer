@@ -21,6 +21,11 @@ def test_summary_endpoint(client):
     body = r.json()
     assert body["window"] == {"start": "2026-09-01", "end": "2026-09-30", "granularity": "DAILY"}
     assert body["rows"][0]["label"] == "prod"
+    assert body["include_nat_volume"] is False
+
+    r = client.get("/api/dto/summary", params={"period": "month", "start": "2026-09-01", "include_nat_volume": "true"})
+    assert r.json()["include_nat_volume"] is True
+    assert r.json()["by_type"]["NAT Gateway"]["gb"] > 0
 
 
 def test_bad_params_return_400(client):

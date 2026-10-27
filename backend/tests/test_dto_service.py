@@ -9,6 +9,7 @@ from app.ce_client import CostExplorer
 from app.dto_service import (
     INTER_AZ,
     INTER_REGION,
+    EGRESS_TYPES,
     INTERNET_OUT,
     NAT_GATEWAY,
     OTHER_OUT,
@@ -129,8 +130,25 @@ def test_summary_with_stubbed_cost_explorer():
         )
     stub.add_response(
         "get_cost_and_usage",
-        {"ResultsByTime": [{"TimePeriod": {"Start": "2026-08-01", "End": "2026-08-31"}, "Total": m(15.0, 900), "Groups": []}]},
-        {"TimePeriod": {"Start": "2026-08-01", "End": "2026-08-31"}, "Granularity": "MONTHLY", "Metrics": ANY, "Filter": ANY},
+        {
+            "ResultsByTime": [
+                {
+                    "TimePeriod": {"Start": "2026-08-01", "End": "2026-08-31"},
+                    "Total": {},
+                    "Groups": [
+                        {"Keys": ["USE1-DataTransfer-Out-Bytes"], "Metrics": m(9.0, 100)},
+                        {"Keys": ["USE1-DataTransfer-Regional-Bytes"], "Metrics": m(6.0, 800)},
+                    ],
+                }
+            ]
+        },
+        {
+            "TimePeriod": {"Start": "2026-08-01", "End": "2026-08-31"},
+            "Granularity": "MONTHLY",
+            "Metrics": ANY,
+            "Filter": ANY,
+            "GroupBy": [{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
+        },
     )
 
     with stub:
@@ -140,7 +158,10 @@ def test_summary_with_stubbed_cost_explorer():
 
     assert s.total_cost == pytest.approx(20.0)
     assert s.total_gb == pytest.approx(1150)
+    assert s.egress_gb == pytest.approx(150)
     assert s.prev_total_cost == pytest.approx(15.0)
+    assert s.prev_total_gb == pytest.approx(900)
+    assert s.prev_egress_gb == pytest.approx(100)
     assert s.estimated is True
     assert [r.key for r in s.rows] == ["us-east-1", "eu-west-1"]
     assert s.rows[0].label == "US East (N. Virginia)"
@@ -196,3 +217,28 @@ def test_discounts_excluded_by_default(mock_service):
     assert net.total_cost < gross.total_cost
     assert net.total_gb == pytest.approx(gross.total_gb)  # discounts carry no volume
     assert any(r.cost < 0 for r in net.rows)
+
+
+def test_nat_volume_excluded_by_default(mock_service):
+    s = mock_service.summary("month", date(2026, 9, 1), None, "REGION", {}, today=TODAY)
+    with_nat = mock_service.summary("month", date(2026, 9, 1), None, "REGION", {}, include_nat_volume=True, today=TODAY)
+
+    assert not s.include_nat_volume and with_nat.include_nat_volume
+    assert s.by_type[NAT_GATEWAY].cost > 0
+    assert s.by_type[NAT_GATEWAY].gb == 0
+    assert all(NAT_GATEWAY not in p.values for p in s.volume_series)
+    assert with_nat.by_type[NAT_GATEWAY].gb > 0
+    assert with_nat.total_gb == pytest.approx(s.total_gb + with_nat.by_type[NAT_GATEWAY].gb)
+    assert with_nat.total_cost == pytest.approx(s.total_cost)
+    assert with_nat.prev_total_gb > s.prev_total_gb
+    assert with_nat.prev_total_cost == pytest.approx(s.prev_total_cost)
+
+
+def test_egress_gb_counts_egress_types_only(mock_service):
+    s = mock_service.summary("month", date(2026, 9, 1), None, "REGION", {}, include_nat_volume=True, today=TODAY)
+    assert s.egress_gb == pytest.approx(sum(s.by_type[t].gb for t in EGRESS_TYPES))
+    assert 0 < s.egress_gb < s.total_gb
+    assert s.egress_gb == pytest.approx(
+        mock_service.summary("month", date(2026, 9, 1), None, "REGION", {}, today=TODAY).egress_gb
+    )
+    assert 0 < s.prev_egress_gb < s.prev_total_gb

@@ -171,16 +171,29 @@ Tags with a suffix, such as `v0.3.0-rc.1`, are published as pre-releases and don
 
 Usage types are discovered with `GetDimensionValues` and then classified:
 
-| Transfer type | Usage type pattern |
-|---|---|
-| Internet Out | `*DataTransfer-Out-Bytes` (includes CloudFront edge egress) |
-| Inter-Region | `<SRC>-<DST>-AWS-Out-Bytes` |
-| Inter-AZ | `*DataTransfer-Regional-Bytes` |
-| NAT Gateway | `*NatGateway-Bytes` (data processing) |
-| To CloudFront | `*CloudFront-Out-Bytes` |
-| Other Out | anything else ending in `Out-Bytes`, `Out-OBytes` or `Out-ABytes` |
+| Transfer type | Usage type pattern | Role |
+|---|---|---|
+| Internet Out | `*DataTransfer-Out-Bytes` (includes CloudFront edge egress) | Egress |
+| Inter-Region | `<SRC>-<DST>-AWS-Out-Bytes` | Egress |
+| Other Out | anything else ending in `Out-Bytes`, `Out-OBytes` or `Out-ABytes` | Egress |
+| Inter-AZ | `*DataTransfer-Regional-Bytes` | Transit |
+| NAT Gateway | `*NatGateway-Bytes` (data processing) | Transit (processing fee) |
+| To CloudFront | `*CloudFront-Out-Bytes` | Transit |
 
 Inbound usage types (`*-In-*`) are excluded. You can narrow the result to particular transfer types with the filter.
+
+### Avoiding double-counting
+Every charge above is real money, so **cost** is never double-counted. **Volume** can be. Take 100 GB that goes from an instance through a NAT gateway in another AZ out to the internet. AWS bills it as:
+
+- Inter-AZ: 200 GB, because Inter-AZ is billed on both the sending and the receiving side
+- NAT Gateway data processing: 100 GB
+- Internet Out: 100 GB
+
+That adds up to about 400 GB of usage for 100 GB that actually left AWS. The app handles this as follows:
+
+- **NAT Gateway** cost is always counted. Its volume is left out of every GB figure unless you turn on **Include NAT volume** (`include_nat_volume=true`). The effective rate leaves NAT cost out while NAT volume is excluded.
+- **Egress** (`egress_gb`, shown under "Data transferred") counts only Internet Out, Inter-Region and Other Out: the bytes that leave AWS or cross regions.
+- **Transit** types (Inter-AZ, NAT Gateway, To CloudFront) move data inside AWS. Their bytes show up again under an egress type, or, for Inter-AZ, twice. The volume charts label them "(transit)".
 
 ## API
 
@@ -188,10 +201,11 @@ Interactive docs are at `/docs` while the app is running.
 
 - `GET /api/health`: status and version
 - `GET /api/meta`: accounts, regions, tag keys, cost categories and breakdown options
-- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&metric=UnblendedCost&include_discounts=false&filter=REGION=us-east-1&filter=TAG:vpc=prod`
+- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&metric=UnblendedCost&include_discounts=false&include_nat_volume=false&filter=REGION=us-east-1&filter=TAG:vpc=prod`
   - `week` and `month` take the period containing `start` (today by default). `custom` uses `start` to `end`, both inclusive.
   - `group_by`: `REGION`, `LINKED_ACCOUNT`, `SERVICE`, `TRANSFER_TYPE`, `USAGE_TYPE`, `TAG:<key>` or `COST_CATEGORY:<name>`
   - `include_discounts`: `false` (default) for list-price usage, `true` for net of credits and discounts
+  - `include_nat_volume`: `false` (default) leaves NAT Gateway data processing out of volume figures (its cost is still counted), `true` adds it back
   - `filter` can be repeated. Values for the same dimension are OR'd and different dimensions are AND'd. An empty tag value (`TAG:vpc=`) means untagged.
 - `GET /api/dto/export.csv`: same parameters, returns a CSV file
 - `POST /api/cache/clear`

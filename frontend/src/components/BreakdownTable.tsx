@@ -76,7 +76,9 @@ export default function BreakdownTable({ data, loading, groupLabel, drillHint, o
       type: 'number',
       flex: 0.5,
       minWidth: 90,
-      valueGetter: (_: unknown, row: Row) => (row.gb ? row.cost / row.gb : 0),
+      // Leave out NAT cost while NAT volume isn't counted, as the effective rate KPI does.
+      valueGetter: (_: unknown, row: Row) =>
+        row.gb ? (row.cost - (data?.include_nat_volume ? 0 : (row.by_type['NAT Gateway'] ?? 0))) / row.gb : 0,
       valueFormatter: (v: number) => rate(v, currency),
     },
     {
