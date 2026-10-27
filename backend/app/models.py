@@ -35,6 +35,7 @@ class Summary(BaseModel):
     previous_window: WindowOut | None
     group_by: str
     metric: str
+    include_discounts: bool
     currency: str
     total_cost: float
     total_gb: float

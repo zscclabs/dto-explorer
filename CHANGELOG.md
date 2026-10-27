@@ -9,6 +9,10 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - Data volume (GB) over time chart, stacked by transfer type.
 - Data volume share by transfer type donut, next to the volume chart.
+- "Include discounts & credits" switch (`include_discounts` API parameter) to show net cost.
+
+### Fixed
+- Credits, refunds and EDP / private-rate discounts are booked by AWS as negative charges, often under no region. They are now excluded by default, so breakdowns no longer show negative groups or shares above 100%.
 
 ## [0.1.0] - 2026-10-26
 

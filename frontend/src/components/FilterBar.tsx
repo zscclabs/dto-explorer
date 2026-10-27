@@ -3,12 +3,15 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import InputLabel from '@mui/material/InputLabel';
 import ListSubheader from '@mui/material/ListSubheader';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
 import FilterAltOffRounded from '@mui/icons-material/FilterAltOffRounded';
 import type { Filters, Meta, Option } from '../api';
 import { TRANSFER_TYPE_COLORS } from '../theme';
@@ -17,9 +20,11 @@ interface Props {
   meta: Meta | null;
   groupBy: string;
   metric: string;
+  includeDiscounts: boolean;
   filters: Filters;
   onGroupBy: (value: string) => void;
   onMetric: (value: string) => void;
+  onIncludeDiscounts: (value: boolean) => void;
   onFilters: (value: Filters) => void;
   valueLabel: (dim: string, value: string) => string;
 }
@@ -77,7 +82,18 @@ function MultiSelect({
   );
 }
 
-export default function FilterBar({ meta, groupBy, metric, filters, onGroupBy, onMetric, onFilters, valueLabel }: Props) {
+export default function FilterBar({
+  meta,
+  groupBy,
+  metric,
+  includeDiscounts,
+  filters,
+  onGroupBy,
+  onMetric,
+  onIncludeDiscounts,
+  onFilters,
+  valueLabel,
+}: Props) {
   const setDim = (dim: string, values: string[]) => {
     const next = { ...filters };
     if (values.length) next[dim] = values;
@@ -139,6 +155,13 @@ export default function FilterBar({ meta, groupBy, metric, filters, onGroupBy, o
             ))}
           </Select>
         </FormControl>
+        <Tooltip title="Off: list-price usage charges only, so every breakdown adds up to 100%. On: net of credits, refunds and EDP / private-rate discounts, which AWS books as negative charges and can show as negative groups.">
+          <FormControlLabel
+            control={<Switch checked={includeDiscounts} onChange={(e) => onIncludeDiscounts(e.target.checked)} />}
+            label="Include discounts & credits"
+            sx={{ whiteSpace: 'nowrap', mr: 0 }}
+          />
+        </Tooltip>
       </Stack>
 
       {(extra.length > 0 || anyFilters) && (

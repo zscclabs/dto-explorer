@@ -182,6 +182,7 @@ class DtoService:
         group_by: str,
         filters: dict[str, list[str]],
         metric: str = "UnblendedCost",
+        include_discounts: bool = False,
         today: date | None = None,
     ) -> Summary:
         _validate_dimension(group_by)
@@ -192,8 +193,8 @@ class DtoService:
         except ValueError as e:
             raise DtoQueryError(str(e)) from e
 
-        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), metric, resolved.query.end)
-        return self.cache.get_or_set(key, lambda: self._summary(period, resolved, group_by, filters, metric))
+        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), metric, include_discounts, resolved.query.end)
+        return self.cache.get_or_set(key, lambda: self._summary(period, resolved, group_by, filters, metric, include_discounts))
 
     def _summary(
         self,
@@ -202,6 +203,7 @@ class DtoService:
         group_by: str,
         filters: dict[str, list[str]],
         metric: str,
+        include_discounts: bool,
     ) -> Summary:
         q = resolved.query
         result = Summary(
@@ -211,6 +213,7 @@ class DtoService:
             previous_window=None if q.is_empty else _window_out(resolved.previous),
             group_by=group_by,
             metric=metric,
+            include_discounts=include_discounts,
             currency="USD",
             total_cost=0.0,
             total_gb=0.0,
@@ -243,7 +246,7 @@ class DtoService:
             q.end,
             q.granularity,
             [metric, "UsageQuantity"],
-            self._filter_expr(usage_types, filters),
+            self._filter_expr(usage_types, filters, include_discounts),
             ce_group,
         )
 
@@ -289,15 +292,17 @@ class DtoService:
         result.series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(series.items())]
         result.volume_series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(volume.items())]
 
-        result.prev_total_cost, result.prev_total_gb = self._previous_totals(resolved.previous, filters, metric)
+        result.prev_total_cost, result.prev_total_gb = self._previous_totals(resolved.previous, filters, metric, include_discounts)
         return result
 
-    def _previous_totals(self, w: periods.Window, filters: dict[str, list[str]], metric: str) -> tuple[float, float]:
+    def _previous_totals(
+        self, w: periods.Window, filters: dict[str, list[str]], metric: str, include_discounts: bool
+    ) -> tuple[float, float]:
         usage_types = self._filtered_usage_types(w.start, w.end, filters)
         if not usage_types:
             return 0.0, 0.0
         results, _ = self.ce.cost_and_usage(
-            w.start, w.end, "MONTHLY", [metric, "UsageQuantity"], self._filter_expr(usage_types, filters)
+            w.start, w.end, "MONTHLY", [metric, "UsageQuantity"], self._filter_expr(usage_types, filters, include_discounts)
         )
         cost = sum(float(r.get("Total", {}).get(metric, {}).get("Amount", 0)) for r in results)
         gb = sum(float(r.get("Total", {}).get("UsageQuantity", {}).get("Amount", 0)) for r in results)
@@ -312,8 +317,14 @@ class DtoService:
         return usage_types
 
     @staticmethod
-    def _filter_expr(usage_types: dict[str, str], filters: dict[str, list[str]]) -> dict[str, Any]:
+    def _filter_expr(
+        usage_types: dict[str, str], filters: dict[str, list[str]], include_discounts: bool = False
+    ) -> dict[str, Any]:
         parts: list[dict[str, Any]] = [{"Dimensions": {"Key": "USAGE_TYPE", "Values": sorted(usage_types)}}]
+        if not include_discounts:
+            # Credits, refunds and EDP / private-rate discounts are booked as negative line items on the
+            # same usage types (often under another region), which skews per-group shares. Keep list-price usage only.
+            parts.append({"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Usage"]}})
         for dim, values in sorted(filters.items()):
             if dim in ("TRANSFER_TYPE", "USAGE_TYPE"):
                 continue  # applied by narrowing the usage type list

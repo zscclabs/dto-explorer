@@ -32,6 +32,7 @@ import { rangeLabel } from './format';
 interface ViewState extends PeriodValue {
   groupBy: string;
   metric: string;
+  includeDiscounts: boolean;
   filters: Filters;
 }
 
@@ -52,6 +53,7 @@ function readUrl(): ViewState {
     end: p.get('end') ?? dayjs().subtract(1, 'day').format('YYYY-MM-DD'),
     groupBy: p.get('group_by') ?? 'REGION',
     metric: p.get('metric') ?? 'UnblendedCost',
+    includeDiscounts: p.get('include_discounts') === 'true',
     filters,
   };
 }
@@ -63,6 +65,7 @@ function toQuery(s: ViewState): Query {
     end: s.period === 'custom' ? s.end : undefined,
     groupBy: s.groupBy,
     metric: s.metric,
+    includeDiscounts: s.includeDiscounts,
     filters: s.filters,
   };
 }
@@ -210,9 +213,11 @@ export default function App() {
                 meta={meta}
                 groupBy={view.groupBy}
                 metric={view.metric}
+                includeDiscounts={view.includeDiscounts}
                 filters={view.filters}
                 onGroupBy={(groupBy) => update({ groupBy })}
                 onMetric={(metric) => update({ metric })}
+                onIncludeDiscounts={(includeDiscounts) => update({ includeDiscounts })}
                 onFilters={(filters) => update({ filters })}
                 valueLabel={valueLabel}
               />

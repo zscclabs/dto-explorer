@@ -41,6 +41,7 @@ export interface Summary {
   previous_window: Window | null;
   group_by: string;
   metric: string;
+  include_discounts: boolean;
   currency: string;
   total_cost: number;
   total_gb: number;
@@ -60,6 +61,7 @@ export interface Query {
   end?: string;
   groupBy: string;
   metric: string;
+  includeDiscounts: boolean;
   filters: Filters;
 }
 
@@ -67,6 +69,7 @@ export function toSearchParams(q: Query): URLSearchParams {
   const p = new URLSearchParams({ period: q.period, group_by: q.groupBy, metric: q.metric });
   if (q.start) p.set('start', q.start);
   if (q.end && q.period === 'custom') p.set('end', q.end);
+  if (q.includeDiscounts) p.set('include_discounts', 'true');
   for (const [dim, values] of Object.entries(q.filters)) {
     for (const v of values) p.append('filter', `${dim}=${v}`);
   }

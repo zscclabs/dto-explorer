@@ -113,6 +113,7 @@ def test_summary_with_stubbed_cost_explorer():
                             "Values": ["USE1-DataTransfer-Out-Bytes", "USE1-DataTransfer-Regional-Bytes", "USE1-USW2-AWS-Out-Bytes"],
                         }
                     },
+                    {"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Usage"]}},
                     {"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": ["111111111111"]}},
                 ]
             },
@@ -183,3 +184,15 @@ def test_meta(mock_service):
     assert {"label": "prod", "value": "111111111111"} in [o.model_dump() for o in meta.accounts]
     assert "TAG:vpc" in [o.value for o in meta.group_by_options]
     assert meta.default_tag_key == "vpc"
+
+
+def test_discounts_excluded_by_default(mock_service):
+    gross = mock_service.summary("month", date(2026, 9, 1), None, "REGION", {}, today=TODAY)
+    net = mock_service.summary("month", date(2026, 9, 1), None, "REGION", {}, include_discounts=True, today=TODAY)
+
+    assert all(r.cost >= 0 for r in gross.rows)
+    assert sum(r.pct for r in gross.rows) == pytest.approx(100)
+    assert net.include_discounts and not gross.include_discounts
+    assert net.total_cost < gross.total_cost
+    assert net.total_gb == pytest.approx(gross.total_gb)  # discounts carry no volume
+    assert any(r.cost < 0 for r in net.rows)

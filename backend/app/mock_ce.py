@@ -34,6 +34,7 @@ class Line:
     price: float
     seed: int
     tags: dict[str, str] = field(default_factory=dict)
+    record_type: str = "Usage"
 
     def gb_on(self, d: date) -> float:
         rng = random.Random(self.seed * 100_003 + d.toordinal())
@@ -47,6 +48,7 @@ class Line:
             "REGION": self.region,
             "LINKED_ACCOUNT": self.account,
             "SERVICE": self.service,
+            "RECORD_TYPE": self.record_type,
         }.get(dim, "")
 
 
@@ -77,6 +79,11 @@ def _build_lines() -> list[Line]:
     for prefix, base in (("US", 2500), ("EU", 1200), ("AP", 600)):
         lines.append(
             Line(f"{prefix}-DataTransfer-Out-Bytes", "global", "111111111111", "Amazon CloudFront", base, 0.085, len(lines), {"vpc": "", "team": "search"})
+        )
+    # Negotiated discounts are booked as negative line items, often without the original region.
+    for prefix in ("USE1", "EU"):
+        lines.append(
+            Line(f"{prefix}-DataTransfer-Out-Bytes", "NoRegion", "111111111111", "EC2 - Other", 1500, -0.015, len(lines), {"vpc": "", "team": ""}, "Private Rate Card Discount")
         )
     return lines
 
@@ -177,6 +184,8 @@ class MockCostExplorerClient:
                 for line in lines:
                     gb = line.gb_on(d)
                     cost = gb * line.price
+                    if line.record_type != "Usage":
+                        gb = 0.0  # discounts carry cost but no usage quantity
                     total[0] += cost
                     total[1] += gb
                     if GroupBy:

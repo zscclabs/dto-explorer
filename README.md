@@ -7,6 +7,8 @@ A web app that totals **AWS Data Transfer Out (DTO)** cost and volume for a week
 - **License:** MIT (see [LICENSE](LICENSE))
 - **Packaging:** one Docker image (FastAPI serves both the API and the built UI), published to GHCR when a release is tagged
 
+![DTO Explorer dashboard: KPIs, cost and data volume over time, share by region and by transfer type](docs/dto-explore.png)
+
 ## Contents
 - [Features](#features)
 - [Requirements](#requirements)
@@ -23,7 +25,7 @@ A web app that totals **AWS Data Transfer Out (DTO)** cost and volume for a week
 - **Headline numbers:** total cost, total volume, cost per GB and top contributor. Cost and volume show the change against the previous period of the same length.
 - **Charts and table:** stacked daily or monthly cost chart, share donut, and a sortable, searchable table with click-to-drill-down
 - **Filters:** account, region and transfer type, plus drill-down filters on any dimension
-- **Other:** CSV export, shareable URLs, a choice of cost metric (unblended, amortized, net and so on), and a mock-data mode that needs no AWS account
+- **Other:** CSV export, shareable URLs, a choice of cost metric (unblended, amortized, net and so on), a [discounts and credits](#discounts-and-credits) switch, and a mock-data mode that needs no AWS account
 
 ## Requirements
 
@@ -88,6 +90,9 @@ The UI shows an AWS error. Run `aws sso login --profile my-profile` again. You d
 
 ### Cost
 Each Cost Explorer request costs **$0.01**. One dashboard view makes about 12 requests on a cold cache. Responses are cached in memory for 1 hour (`DTO_CACHE_TTL_SECONDS`). The ↻ button in the UI clears the cache and fetches fresh data.
+
+### Discounts and credits
+By default the app shows **usage charges at list price** (Cost Explorer `RECORD_TYPE = Usage`). AWS books credits, refunds and EDP / private-rate discounts as separate negative charges, often under no region, so including them would produce negative groups and shares above 100%. Turn on **Include discounts & credits** to see net cost instead. Volume (GB) is the same either way.
 
 ### Per-VPC breakdown
 Cost Explorer has **no VPC dimension**. To get a per-VPC breakdown:
@@ -179,9 +184,10 @@ Interactive docs are at `/docs` while the app is running.
 
 - `GET /api/health`: status and version
 - `GET /api/meta`: accounts, regions, tag keys, cost categories and breakdown options
-- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&metric=UnblendedCost&filter=REGION=us-east-1&filter=TAG:vpc=prod`
+- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&metric=UnblendedCost&include_discounts=false&filter=REGION=us-east-1&filter=TAG:vpc=prod`
   - `week` and `month` take the period containing `start` (today by default). `custom` uses `start` to `end`, both inclusive.
   - `group_by`: `REGION`, `LINKED_ACCOUNT`, `SERVICE`, `TRANSFER_TYPE`, `USAGE_TYPE`, `TAG:<key>` or `COST_CATEGORY:<name>`
+  - `include_discounts`: `false` (default) for list-price usage, `true` for net of credits and discounts
   - `filter` can be repeated. Values for the same dimension are OR'd and different dimensions are AND'd. An empty tag value (`TAG:vpc=`) means untagged.
 - `GET /api/dto/export.csv`: same parameters, returns a CSV file
 - `POST /api/cache/clear`
