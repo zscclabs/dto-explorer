@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - Data volume (GB) over time chart, stacked by transfer type.
+- Data volume share by transfer type donut, next to the volume chart.
 
 ## [0.1.0] - 2026-10-26
 

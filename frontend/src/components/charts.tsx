@@ -113,7 +113,7 @@ export function VolumeChart({ data }: { data: Summary | null }) {
   }));
 
   return (
-    <Paper sx={{ p: 2.5 }}>
+    <Paper sx={{ p: 2.5, height: '100%' }}>
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
           DTO data volume over time by transfer type
@@ -151,38 +151,60 @@ export function BreakdownChart({ data, title }: { data: Summary | null; title: s
 
   const groups = slices(data);
   const topKeys = new Set(groups.map((g) => g.key));
-  const pieData = groups.map((g) => ({
+  const items = groups.map((g) => ({
     id: g.key,
     label: g.label,
     color: g.color,
     value: g.key === OTHER_KEY ? data.rows.filter((r) => !topKeys.has(r.key)).reduce((s, r) => s + r.cost, 0) : data.rows.find((r) => r.key === g.key)!.cost,
   }));
 
+  return <Donut title={title} items={items} height={height} format={(v) => money(v, data.currency)} />;
+}
+
+export function VolumeShareChart({ data }: { data: Summary | null }) {
+  const height = 300;
+  if (!data) return <Skeleton variant="rounded" height={height + 76} />;
+
+  const items = Object.entries(data.by_type)
+    .filter(([, a]) => a.gb > 0)
+    .sort(([, a], [, b]) => b.gb - a.gb)
+    .map(([t, a]) => ({ id: t, label: t, color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR, value: a.gb }));
+
+  return <Donut title="Data volume share by transfer type" items={items} height={height} format={bytes} />;
+}
+
+interface DonutItem {
+  id: string;
+  label: string;
+  color: string;
+  value: number;
+}
+
+function Donut({ title, items, height, format }: { title: string; items: DonutItem[]; height: number; format: (v: number) => string }) {
+  const total = items.reduce((s, i) => s + i.value, 0);
   return (
     <Paper sx={{ p: 2.5, height: '100%' }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
         {title}
       </Typography>
-      {data.total_cost === 0 ? (
+      {total === 0 ? (
         <Empty height={height} />
       ) : (
-        <Box sx={{ position: 'relative' }}>
-          <PieChart
-            height={height}
-            series={[
-              {
-                data: pieData,
-                innerRadius: 72,
-                outerRadius: 118,
-                paddingAngle: 1.5,
-                cornerRadius: 5,
-                highlightScope: { fade: 'global', highlight: 'item' },
-                valueFormatter: (item) => `${money(item.value, data.currency)} (${((item.value / data.total_cost) * 100).toFixed(1)}%)`,
-              },
-            ]}
-            slotProps={{ legend: { direction: 'vertical', position: { vertical: 'middle', horizontal: 'end' } } }}
-          />
-        </Box>
+        <PieChart
+          height={height}
+          series={[
+            {
+              data: items,
+              innerRadius: 72,
+              outerRadius: 118,
+              paddingAngle: 1.5,
+              cornerRadius: 5,
+              highlightScope: { fade: 'global', highlight: 'item' },
+              valueFormatter: (item) => `${format(item.value)} (${((item.value / total) * 100).toFixed(1)}%)`,
+            },
+          ]}
+          slotProps={{ legend: { direction: 'vertical', position: { vertical: 'middle', horizontal: 'end' } } }}
+        />
       )}
     </Paper>
   );

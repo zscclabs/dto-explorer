@@ -26,7 +26,7 @@ import BreakdownTable from './components/BreakdownTable';
 import FilterBar, { dimLabel } from './components/FilterBar';
 import KpiCards from './components/KpiCards';
 import PeriodSelector, { type PeriodValue } from './components/PeriodSelector';
-import { BreakdownChart, TrendChart, VolumeChart } from './components/charts';
+import { BreakdownChart, TrendChart, VolumeChart, VolumeShareChart } from './components/charts';
 import { rangeLabel } from './format';
 
 interface ViewState extends PeriodValue {
@@ -253,7 +253,14 @@ export default function App() {
                   <BreakdownChart data={data} title={`Share by ${groupLabel.toLowerCase()}`} />
                 </Grid>
               </Grid>
-              <VolumeChart data={data} />
+              <Grid container spacing={2.5}>
+                <Grid size={{ xs: 12, lg: 8 }}>
+                  <VolumeChart data={data} />
+                </Grid>
+                <Grid size={{ xs: 12, lg: 4 }}>
+                  <VolumeShareChart data={data} />
+                </Grid>
+              </Grid>
               <BreakdownTable
                 data={data}
                 loading={loading}
