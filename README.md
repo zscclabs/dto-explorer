@@ -67,6 +67,10 @@ AWS_PROFILE=my-profile make serve        # production build, one process → htt
 
 `make dev` runs uvicorn with auto-reload on `:8000` and Vite on `:5173`. Vite forwards `/api` requests to uvicorn.
 
+### Option C: Terminal UI
+
+[DTO TUI](https://github.com/zscclabs/dto) is a separate project with the same capabilities in the terminal: a single Python script you run with `uv run dto_tui.py`.
+
 ### Single account vs. AWS Organization
 - **Single account:** use that account's credentials. The account filter will show just that one account.
 - **Organization:** use credentials for the **management (payer) account** to see every linked account. Breaking down by account then shows each account by name.
