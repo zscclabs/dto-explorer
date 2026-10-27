@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Data volume (GB) over time chart, stacked by transfer type.
+
 ## [0.1.0] - 2026-10-26
 
 ### Added

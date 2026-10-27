@@ -147,6 +147,7 @@ def test_summary_with_stubbed_cost_explorer():
     assert s.rows[0].pct == pytest.approx(50.0)
     assert s.by_type[INTER_AZ].gb == pytest.approx(1000)
     assert [p.date for p in s.series] == [date(2026, 9, 1), date(2026, 9, 2)]
+    assert [p.values for p in s.volume_series] == [{INTERNET_OUT: 100, INTER_REGION: 50}, {INTER_AZ: 1000}]
 
 
 @pytest.fixture
@@ -160,6 +161,7 @@ def test_group_by_totals_are_consistent(mock_service, group_by):
     assert s.total_cost > 0
     assert sum(r.cost for r in s.rows) == pytest.approx(s.total_cost)
     assert sum(a.cost for a in s.by_type.values()) == pytest.approx(s.total_cost)
+    assert sum(sum(p.values.values()) for p in s.volume_series) == pytest.approx(s.total_gb)
     assert all(not r.key.endswith("In-Bytes") for r in s.rows)
 
 

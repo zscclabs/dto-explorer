@@ -49,6 +49,7 @@ export interface Summary {
   by_type: Record<string, { cost: number; gb: number }>;
   rows: Row[];
   series: { date: string; values: Record<string, number> }[];
+  volume_series: { date: string; values: Record<string, number> }[]; // transfer type -> GB
   estimated: boolean;
   mock: boolean;
 }

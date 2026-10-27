@@ -43,6 +43,7 @@ class Summary(BaseModel):
     by_type: dict[str, Amount]
     rows: list[Row]
     series: list[SeriesPoint]
+    volume_series: list[SeriesPoint]  # transfer type -> GB
     estimated: bool
     mock: bool
 

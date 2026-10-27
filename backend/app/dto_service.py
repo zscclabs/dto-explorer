@@ -219,6 +219,7 @@ class DtoService:
             by_type={t: Amount() for t in TRANSFER_TYPES},
             rows=[],
             series=[],
+            volume_series=[],
             estimated=False,
             mock=self.mock,
         )
@@ -248,9 +249,11 @@ class DtoService:
 
         rows: dict[str, Row] = {}
         series: dict[str, dict[str, float]] = {}
+        volume: dict[str, dict[str, float]] = {}
         for r in results:
             result.estimated |= bool(r.get("Estimated"))
             bucket = series.setdefault(r["TimePeriod"]["Start"], defaultdict(float))
+            vbucket = volume.setdefault(r["TimePeriod"]["Start"], defaultdict(float))
             for g in r.get("Groups", []):
                 ut = g["Keys"][0]
                 kind = usage_types.get(ut)
@@ -274,6 +277,7 @@ class DtoService:
                 row.gb += gb
                 row.by_type[kind] = row.by_type.get(kind, 0.0) + cost
                 bucket[gkey] += cost
+                vbucket[kind] += gb
                 result.by_type[kind].cost += cost
                 result.by_type[kind].gb += gb
                 result.total_cost += cost
@@ -283,6 +287,7 @@ class DtoService:
             row.pct = row.cost / result.total_cost * 100 if result.total_cost else 0.0
         result.rows = sorted(rows.values(), key=lambda x: x.cost, reverse=True)
         result.series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(series.items())]
+        result.volume_series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(volume.items())]
 
         result.prev_total_cost, result.prev_total_gb = self._previous_totals(resolved.previous, filters, metric)
         return result

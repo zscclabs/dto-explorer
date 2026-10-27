@@ -7,8 +7,8 @@ import Typography from '@mui/material/Typography';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { PieChart } from '@mui/x-charts/PieChart';
 import type { Summary } from '../api';
-import { money } from '../format';
-import { OTHER_COLOR, colorFor } from '../theme';
+import { bytes, money } from '../format';
+import { OTHER_COLOR, TRANSFER_TYPE_COLORS, colorFor } from '../theme';
 
 const TOP_N = 8;
 const OTHER_KEY = '__other__';
@@ -82,6 +82,64 @@ export function TrendChart({ data, title }: { data: Summary | null; title: strin
           slotProps={{ legend: { position: { vertical: 'bottom', horizontal: 'center' } } }}
           borderRadius={4}
         />
+      )}
+    </Paper>
+  );
+}
+
+export function VolumeChart({ data }: { data: Summary | null }) {
+  const height = 300;
+  if (!data) return <Skeleton variant="rounded" height={height + 76} />;
+
+  const daily = data.window.granularity === 'DAILY';
+  const labels = data.volume_series.map((p) => dayjs(p.date).format(daily ? 'MMM D' : 'MMM YYYY'));
+  // Unlike cost, free transfer (e.g. to CloudFront) still has volume, so key off GB here.
+  const types = Object.entries(data.by_type)
+    .filter(([, a]) => a.gb > 0)
+    .sort(([, a], [, b]) => b.gb - a.gb)
+    .map(([t]) => t);
+  // Plot in one unit chosen from the tallest bar so axis ticks land on round numbers.
+  const peak = Math.max(0, ...data.volume_series.map((p) => Object.values(p.values).reduce((s, v) => s + v, 0)));
+  const [unit, divisor] = peak >= 1024 * 1024 ? ['PB', 1024 * 1024] : peak >= 1024 ? ['TB', 1024] : ['GB', 1];
+  const fmt = (v: number | null) => (v == null ? '' : bytes(v * divisor));
+
+  const series = types.map((t) => ({
+    id: t,
+    label: t,
+    color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR,
+    stack: 'total',
+    valueFormatter: fmt,
+    data: data.volume_series.map((p) => (p.values[t] ?? 0) / divisor),
+  }));
+
+  return (
+    <Paper sx={{ p: 2.5 }}>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          DTO data volume over time by transfer type
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {daily ? 'Daily' : 'Monthly'} · {unit}
+        </Typography>
+      </Stack>
+      {types.length === 0 ? (
+        <Empty height={height} />
+      ) : (
+        <BarChart
+          height={height}
+          series={series}
+          xAxis={[{ scaleType: 'band', data: labels, tickLabelStyle: { fontSize: 11 } }]}
+          yAxis={[{ valueFormatter: (v: number) => `${v.toLocaleString()} ${unit}`, width: 72 }]}
+          margin={{ left: 8, right: 8, top: 16, bottom: 8 }}
+          slotProps={{ legend: { position: { vertical: 'bottom', horizontal: 'center' } } }}
+          borderRadius={4}
+        />
+      )}
+      {types.includes('NAT Gateway') && (
+        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>
+          NAT Gateway volume is data processed by the gateway; traffic leaving through it to the internet is also counted
+          under Internet Out.
+        </Typography>
       )}
     </Paper>
   );
