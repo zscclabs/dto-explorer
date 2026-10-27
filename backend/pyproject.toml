@@ -1,6 +1,6 @@
 [project]
 name = "dto-explorer"
-version = "0.1.0"
+version = "0.2.0"
 description = "AWS Data Transfer Out explorer backed by Cost Explorer"
 license = "MIT"
 requires-python = ">=3.11"
