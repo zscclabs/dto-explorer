@@ -6,13 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed (breaking)
+- The app reports data transfer **volume only**. Cost, the cost-metric choice, the discounts switch, effective rate and $/GB are gone. The API no longer accepts `metric` or `include_discounts` (old links still load; the parameters are ignored), and `Summary` / `Row` no longer have cost fields. `by_type` is now GB per transfer type.
+- "Inter-Region" is renamed "Inter-Region Out".
+- CSV export columns are `gb, pct, gb_<transfer type>…`.
+
 ### Added
-- "Include NAT volume" switch (`include_nat_volume` API parameter) to add NAT Gateway data processed back into volume figures.
-- Egress volume (`egress_gb`, `prev_egress_gb`): Internet Out, Inter-Region and Other Out only, shown under "Data transferred".
-- Inter-AZ, NAT Gateway and To CloudFront are labelled as transit in the volume charts (`transit_types` in `/api/meta`).
+- Inbound traffic: Internet In (`*DataTransfer-In-Bytes`), Inter-Region In (`*-AWS-In-Bytes`) and Other In.
+- Direction (Out / In / Transit) as a filter and a breakdown (`DIRECTION`), with `egress_gb`, `ingress_gb`, `transit_gb` and their previous-period values.
+- Egress, Ingress and Transit KPI tiles; the trend chart and share donut by breakdown now show GB.
+- Inter-AZ, NAT Gateway and To CloudFront are labelled as transit in the volume charts (`directions` in `/api/meta`).
+- "Include NAT volume" switch (`include_nat_volume` API parameter) to add NAT Gateway data processed back into transit.
 
 ### Fixed
-- Data volume no longer double-counts NAT Gateway traffic: NAT data processing bytes are excluded from volume by default (their cost is still counted), and the effective rate leaves NAT cost out when its volume is excluded.
+- Data volume no longer double-counts NAT Gateway traffic: NAT data processed is left out of every total by default.
 
 ## [0.2.0] - 2026-10-26
 

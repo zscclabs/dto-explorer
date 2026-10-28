@@ -6,8 +6,8 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { PieChart } from '@mui/x-charts/PieChart';
-import type { Summary } from '../api';
-import { bytes, money } from '../format';
+import type { Direction, Summary } from '../api';
+import { bytes } from '../format';
 import { OTHER_COLOR, TRANSFER_TYPE_COLORS, colorFor } from '../theme';
 
 const TOP_N = 8;
@@ -19,10 +19,9 @@ interface Slice {
   color: string;
 }
 
-/** Top N groups by cost, plus an "Other" bucket for the rest. */
+/** Top N groups by volume, plus an "Other" bucket for the rest. */
 function slices(data: Summary): Slice[] {
-  // Zero-cost groups (e.g. free transfer to CloudFront) stay in the table but add only legend noise here.
-  const rows = data.rows.filter((r) => r.cost > 0);
+  const rows = data.rows.filter((r) => r.gb > 0);
   const top = rows.slice(0, TOP_N).map((r, i) => ({ key: r.key, label: r.label, color: colorFor(data.group_by, r.key, i) }));
   if (rows.length > TOP_N) top.push({ key: OTHER_KEY, label: `Other (${rows.length - TOP_N})`, color: OTHER_COLOR });
   return top;
@@ -31,7 +30,7 @@ function slices(data: Summary): Slice[] {
 function Empty({ height }: { height: number }) {
   return (
     <Box sx={{ height, display: 'grid', placeItems: 'center', color: 'text.secondary' }}>
-      <Typography variant="body2">No data transfer charges in this period.</Typography>
+      <Typography variant="body2">No data transfer in this period.</Typography>
     </Box>
   );
 }
@@ -44,7 +43,10 @@ export function TrendChart({ data, title }: { data: Summary | null; title: strin
   const topKeys = new Set(groups.map((g) => g.key));
   const daily = data.window.granularity === 'DAILY';
   const labels = data.series.map((p) => dayjs(p.date).format(daily ? 'MMM D' : 'MMM YYYY'));
-  const fmt = (v: number | null) => (v == null ? '' : money(v, data.currency));
+  // Plot in one unit chosen from the tallest bar so axis ticks land on round numbers.
+  const peak = Math.max(0, ...data.series.map((p) => Object.values(p.values).reduce((s, v) => s + v, 0)));
+  const [unit, divisor] = unitFor(peak);
+  const fmt = (v: number | null) => (v == null ? '' : bytes(v * divisor));
 
   const series = groups.map((g) => ({
     id: g.key,
@@ -52,10 +54,11 @@ export function TrendChart({ data, title }: { data: Summary | null; title: strin
     color: g.color,
     stack: 'total',
     valueFormatter: fmt,
-    data: data.series.map((p) =>
-      g.key === OTHER_KEY
-        ? Object.entries(p.values).reduce((sum, [k, v]) => (topKeys.has(k) ? sum : sum + v), 0)
-        : (p.values[g.key] ?? 0),
+    data: data.series.map(
+      (p) =>
+        (g.key === OTHER_KEY
+          ? Object.entries(p.values).reduce((sum, [k, v]) => (topKeys.has(k) ? sum : sum + v), 0)
+          : (p.values[g.key] ?? 0)) / divisor,
     ),
   }));
 
@@ -67,17 +70,17 @@ export function TrendChart({ data, title }: { data: Summary | null; title: strin
         </Typography>
         <Typography variant="body2" color="text.secondary">
           {daily ? 'Daily' : 'Monthly'} · top {groups.filter((g) => g.key !== OTHER_KEY).length}
-          {groups.some((g) => g.key === OTHER_KEY) ? ' + other' : ''}
+          {groups.some((g) => g.key === OTHER_KEY) ? ' + other' : ''} · {unit}
         </Typography>
       </Stack>
-      {data.series.length === 0 || data.total_cost === 0 ? (
+      {data.series.length === 0 || data.total_gb === 0 ? (
         <Empty height={height} />
       ) : (
         <BarChart
           height={height}
           series={series}
           xAxis={[{ scaleType: 'band', data: labels, tickLabelStyle: { fontSize: 11 } }]}
-          yAxis={[{ valueFormatter: (v: number) => money(v, data.currency, true), width: 64 }]}
+          yAxis={[{ valueFormatter: (v: number) => `${v.toLocaleString()} ${unit}`, width: 72 }]}
           margin={{ left: 8, right: 8, top: 16, bottom: 8 }}
           slotProps={{ legend: { position: { vertical: 'bottom', horizontal: 'center' } } }}
           borderRadius={4}
@@ -87,30 +90,33 @@ export function TrendChart({ data, title }: { data: Summary | null; title: strin
   );
 }
 
-/** Legend label that marks types moving data inside AWS, whose volume duplicates or doubles egress. */
-function typeLabel(type: string, transitTypes: string[]): string {
-  return transitTypes.includes(type) ? `${type} (transit)` : type;
+/** A unit from the largest value so axis ticks land on round numbers: [label, GB per unit]. */
+function unitFor(peakGb: number): [string, number] {
+  return peakGb >= 1024 * 1024 ? ['PB', 1024 * 1024] : peakGb >= 1024 ? ['TB', 1024] : ['GB', 1];
 }
 
-export function VolumeChart({ data, transitTypes }: { data: Summary | null; transitTypes: string[] }) {
+/** Legend label that marks transit types, whose volume duplicates or doubles other traffic. */
+function typeLabel(type: string, directions: Record<string, Direction>): string {
+  return directions[type] === 'Transit' ? `${type} (transit)` : type;
+}
+
+export function VolumeChart({ data, directions }: { data: Summary | null; directions: Record<string, Direction> }) {
   const height = 300;
   if (!data) return <Skeleton variant="rounded" height={height + 76} />;
 
   const daily = data.window.granularity === 'DAILY';
   const labels = data.volume_series.map((p) => dayjs(p.date).format(daily ? 'MMM D' : 'MMM YYYY'));
-  // Unlike cost, free transfer (e.g. to CloudFront) still has volume, so key off GB here.
   const types = Object.entries(data.by_type)
-    .filter(([, a]) => a.gb > 0)
-    .sort(([, a], [, b]) => b.gb - a.gb)
+    .filter(([, gb]) => gb > 0)
+    .sort(([, a], [, b]) => b - a)
     .map(([t]) => t);
-  // Plot in one unit chosen from the tallest bar so axis ticks land on round numbers.
   const peak = Math.max(0, ...data.volume_series.map((p) => Object.values(p.values).reduce((s, v) => s + v, 0)));
-  const [unit, divisor] = peak >= 1024 * 1024 ? ['PB', 1024 * 1024] : peak >= 1024 ? ['TB', 1024] : ['GB', 1];
+  const [unit, divisor] = unitFor(peak);
   const fmt = (v: number | null) => (v == null ? '' : bytes(v * divisor));
 
   const series = types.map((t) => ({
     id: t,
-    label: typeLabel(t, transitTypes),
+    label: typeLabel(t, directions),
     color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR,
     stack: 'total',
     valueFormatter: fmt,
@@ -121,7 +127,7 @@ export function VolumeChart({ data, transitTypes }: { data: Summary | null; tran
     <Paper sx={{ p: 2.5, height: '100%' }}>
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-          DTO data volume over time by transfer type
+          Data volume over time by transfer type
         </Typography>
         <Typography variant="body2" color="text.secondary">
           {daily ? 'Daily' : 'Monthly'} · {unit}
@@ -140,13 +146,13 @@ export function VolumeChart({ data, transitTypes }: { data: Summary | null; tran
           borderRadius={4}
         />
       )}
-      {types.some((t) => transitTypes.includes(t)) && (
+      {types.some((t) => directions[t] === 'Transit') && (
         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>
           Transit types move data inside AWS. Inter-AZ is billed on both the sending and receiving side, so it shows about
           2× the bytes moved.{' '}
           {data.include_nat_volume
-            ? 'NAT Gateway volume duplicates the egress it carries.'
-            : 'NAT Gateway volume is left out because it duplicates the egress it carries (switch: Include NAT volume).'}
+            ? 'NAT Gateway volume duplicates the traffic it carries.'
+            : 'NAT Gateway volume is left out because it duplicates the traffic it carries (switch: Include NAT volume).'}
         </Typography>
       )}
     </Paper>
@@ -163,20 +169,20 @@ export function BreakdownChart({ data, title }: { data: Summary | null; title: s
     id: g.key,
     label: g.label,
     color: g.color,
-    value: g.key === OTHER_KEY ? data.rows.filter((r) => !topKeys.has(r.key)).reduce((s, r) => s + r.cost, 0) : data.rows.find((r) => r.key === g.key)!.cost,
+    value: g.key === OTHER_KEY ? data.rows.filter((r) => !topKeys.has(r.key)).reduce((s, r) => s + r.gb, 0) : data.rows.find((r) => r.key === g.key)!.gb,
   }));
 
-  return <Donut title={title} items={items} height={height} format={(v) => money(v, data.currency)} />;
+  return <Donut title={title} items={items} height={height} format={bytes} />;
 }
 
-export function VolumeShareChart({ data, transitTypes }: { data: Summary | null; transitTypes: string[] }) {
+export function VolumeShareChart({ data, directions }: { data: Summary | null; directions: Record<string, Direction> }) {
   const height = 300;
   if (!data) return <Skeleton variant="rounded" height={height + 76} />;
 
   const items = Object.entries(data.by_type)
-    .filter(([, a]) => a.gb > 0)
-    .sort(([, a], [, b]) => b.gb - a.gb)
-    .map(([t, a]) => ({ id: t, label: typeLabel(t, transitTypes), color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR, value: a.gb }));
+    .filter(([, gb]) => gb > 0)
+    .sort(([, a], [, b]) => b - a)
+    .map(([t, gb]) => ({ id: t, label: typeLabel(t, directions), color: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR, value: gb }));
 
   return <Donut title="Data volume share by transfer type" items={items} height={height} format={bytes} />;
 }

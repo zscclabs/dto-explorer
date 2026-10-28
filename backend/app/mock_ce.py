@@ -67,6 +67,7 @@ def _build_lines() -> list[Line]:
                 (f"{prefix}-DataTransfer-Regional-Bytes", "interaz", "Amazon Relational Database Service", 200),
                 (f"{prefix}-NatGateway-Bytes", "nat", "EC2 - Other", 350),
                 (f"{prefix}-{REGIONS[PEER[region]]}-AWS-Out-Bytes", "interregion", "AWS Data Transfer", 300),
+                (f"{REGIONS[PEER[region]]}-{prefix}-AWS-In-Bytes", "in", "AWS Data Transfer", 220),
                 (f"{prefix}-CloudFront-Out-Bytes", "in", "EC2 - Other", 120),
                 (f"{prefix}-DataTransfer-In-Bytes", "in", "EC2 - Other", 500),
             ]

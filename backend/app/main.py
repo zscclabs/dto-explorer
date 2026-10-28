@@ -52,8 +52,6 @@ class SummaryParams:
         start: date | None = None,
         end: date | None = None,
         group_by: str = "REGION",
-        metric: str = "UnblendedCost",
-        include_discounts: bool = False,
         include_nat_volume: bool = False,
         filters: Annotated[list[str], Query(alias="filter", description="Repeatable DIM=value, e.g. REGION=us-east-1")] = [],
     ):
@@ -61,8 +59,6 @@ class SummaryParams:
         self.start = start
         self.end = end
         self.group_by = group_by
-        self.metric = metric
-        self.include_discounts = include_discounts
         self.include_nat_volume = include_nat_volume
         self.filters = filters
 
@@ -73,8 +69,6 @@ class SummaryParams:
             self.end,
             self.group_by,
             parse_filters(self.filters),
-            self.metric,
-            self.include_discounts,
             self.include_nat_volume,
         )
 
@@ -100,11 +94,9 @@ def export_csv(params: SummaryParams = Depends(), service: DtoService = Depends(
     buf = io.StringIO()
     writer = csv.writer(buf)
     types = list(s.by_type)
-    writer.writerow([s.group_by, "label", f"cost_{s.currency.lower()}", "gb", "pct", *[f"cost_{t}" for t in types]])
+    writer.writerow([s.group_by, "label", "gb", "pct", *[f"gb_{t}" for t in types]])
     for r in s.rows:
-        writer.writerow(
-            [r.key, r.label, f"{r.cost:.4f}", f"{r.gb:.4f}", f"{r.pct:.2f}", *[f"{r.by_type.get(t, 0):.4f}" for t in types]]
-        )
+        writer.writerow([r.key, r.label, f"{r.gb:.4f}", f"{r.pct:.2f}", *[f"{r.by_type.get(t, 0):.4f}" for t in types]])
     name = f"dto_{s.window.start}_{s.window.end}_{s.group_by.replace(':', '-')}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),

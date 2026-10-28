@@ -1,4 +1,4 @@
-"""Data Transfer Out discovery, classification and aggregation on top of Cost Explorer."""
+"""Data transfer volume discovery, classification and aggregation on top of Cost Explorer."""
 
 import re
 from collections import defaultdict
@@ -8,48 +8,62 @@ from typing import Any
 from . import periods
 from .cache import Cache
 from .ce_client import CostExplorer
-from .models import Amount, Meta, Option, Row, SeriesPoint, Summary, WindowOut
+from .models import Meta, Option, Row, SeriesPoint, Summary, WindowOut
 
 INTERNET_OUT = "Internet Out"
-INTER_REGION = "Inter-Region"
+INTER_REGION_OUT = "Inter-Region Out"
+OTHER_OUT = "Other Out"
+INTERNET_IN = "Internet In"
+INTER_REGION_IN = "Inter-Region In"
+OTHER_IN = "Other In"
 INTER_AZ = "Inter-AZ"
 NAT_GATEWAY = "NAT Gateway"
 TO_CLOUDFRONT = "To CloudFront"
-OTHER_OUT = "Other Out"
-TRANSFER_TYPES = [INTERNET_OUT, INTER_REGION, INTER_AZ, NAT_GATEWAY, TO_CLOUDFRONT, OTHER_OUT]
-# Bytes leaving AWS or crossing regions. The other types move data inside AWS and their bytes reappear under
-# an egress type: NAT data processing and origin fetches to CloudFront duplicate the egress they carry, and
-# Inter-AZ is billed on both the sending and the receiving side.
-EGRESS_TYPES = [INTERNET_OUT, INTER_REGION, OTHER_OUT]
-TRANSIT_TYPES = [INTER_AZ, NAT_GATEWAY, TO_CLOUDFRONT]
+
+OUT = "Out"
+IN = "In"
+TRANSIT = "Transit"
+DIRECTIONS = [OUT, IN, TRANSIT]
+# Out: bytes leaving AWS or crossing regions. In: bytes arriving from the internet or another region.
+# Transit moves data inside AWS and its bytes reappear under another type: NAT data processing and origin
+# fetches to CloudFront duplicate the traffic they carry, and Inter-AZ is billed on both the sending and the
+# receiving side.
+DIRECTION = {
+    INTERNET_OUT: OUT,
+    INTER_REGION_OUT: OUT,
+    OTHER_OUT: OUT,
+    INTERNET_IN: IN,
+    INTER_REGION_IN: IN,
+    OTHER_IN: IN,
+    INTER_AZ: TRANSIT,
+    NAT_GATEWAY: TRANSIT,
+    TO_CLOUDFRONT: TRANSIT,
+}
+TRANSFER_TYPES = list(DIRECTION)
 
 # Usage types are "<region prefix>-<kind>", the prefix is omitted for some us-east-1 usage.
 _P = r"(?:[A-Z0-9]+-)?"
 _RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(rf"^{_P}DataTransfer-Regional-Bytes$"), INTER_AZ),
     (re.compile(rf"^{_P}NatGateway-Bytes$"), NAT_GATEWAY),
-    (re.compile(r"^[A-Z0-9]+-[A-Z0-9]+-AWS-Out-A?Bytes$"), INTER_REGION),
+    (re.compile(r"^[A-Z0-9]+-[A-Z0-9]+-AWS-Out-A?Bytes$"), INTER_REGION_OUT),
+    (re.compile(r"^[A-Z0-9]+-[A-Z0-9]+-AWS-In-A?Bytes$"), INTER_REGION_IN),
     (re.compile(rf"^{_P}CloudFront-Out-Bytes$"), TO_CLOUDFRONT),
     # Also matches CloudFront edge egress (e.g. "US-DataTransfer-Out-Bytes"), which is internet egress too.
     (re.compile(rf"^{_P}DataTransfer-Out-Bytes$"), INTERNET_OUT),
+    (re.compile(rf"^{_P}DataTransfer-In-Bytes$"), INTERNET_IN),
 ]
 
 # Substrings used to discover candidate usage types via GetDimensionValues.
-_SEARCH_STRINGS = ["DataTransfer", "Out-Bytes", "Out-OBytes", "Out-ABytes", "NatGateway-Bytes"]
+_SEARCH_STRINGS = ["DataTransfer", "Out-Bytes", "Out-OBytes", "Out-ABytes", "In-Bytes", "In-OBytes", "In-ABytes", "NatGateway-Bytes"]
 
 DIMENSIONS = {
     "REGION": "Region",
     "LINKED_ACCOUNT": "Account",
     "SERVICE": "Service",
     "TRANSFER_TYPE": "Transfer type",
+    "DIRECTION": "Direction",
     "USAGE_TYPE": "Usage type",
-}
-METRICS = {
-    "UnblendedCost": "Unblended cost",
-    "NetUnblendedCost": "Net unblended cost",
-    "AmortizedCost": "Amortized cost",
-    "NetAmortizedCost": "Net amortized cost",
-    "BlendedCost": "Blended cost",
 }
 UNTAGGED = "(untagged)"
 
@@ -96,14 +110,14 @@ class DtoQueryError(ValueError):
 
 
 def classify(usage_type: str) -> str | None:
-    """Map a usage type to a transfer type, or None when it is not outbound transfer."""
-    if "-In-" in usage_type or usage_type.endswith("-In"):
-        return None
+    """Map a usage type to a transfer type, or None when it is not data transfer."""
     for pattern, kind in _RULES:
         if pattern.match(usage_type):
             return kind
-    if "Out-Bytes" in usage_type or "Out-OBytes" in usage_type or "Out-ABytes" in usage_type:
+    if any(s in usage_type for s in ("Out-Bytes", "Out-OBytes", "Out-ABytes")):
         return OTHER_OUT
+    if any(s in usage_type for s in ("In-Bytes", "In-OBytes", "In-ABytes")):
+        return OTHER_IN
     return None
 
 
@@ -153,6 +167,14 @@ def _and(parts: list[dict[str, Any]]) -> dict[str, Any]:
     return parts[0] if len(parts) == 1 else {"And": parts}
 
 
+def _by_direction(by_type: dict[str, float]) -> tuple[float, float, float]:
+    """(out, in, transit) GB from GB per transfer type."""
+    totals = defaultdict(float)
+    for kind, gb in by_type.items():
+        totals[DIRECTION[kind]] += gb
+    return totals[OUT], totals[IN], totals[TRANSIT]
+
+
 def _window_out(w: periods.Window) -> WindowOut:
     return WindowOut(start=w.start, end=w.last_day, granularity=w.granularity)
 
@@ -191,23 +213,17 @@ class DtoService:
         end: date | None,
         group_by: str,
         filters: dict[str, list[str]],
-        metric: str = "UnblendedCost",
-        include_discounts: bool = False,
         include_nat_volume: bool = False,
         today: date | None = None,
     ) -> Summary:
         _validate_dimension(group_by)
-        if metric not in METRICS:
-            raise DtoQueryError(f"unsupported metric: {metric!r}")
         try:
             resolved = periods.resolve(period, start, end, today=today)
         except ValueError as e:
             raise DtoQueryError(str(e)) from e
 
-        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), metric, include_discounts, include_nat_volume, resolved.query.end)
-        return self.cache.get_or_set(
-            key, lambda: self._summary(period, resolved, group_by, filters, metric, include_discounts, include_nat_volume)
-        )
+        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), include_nat_volume, resolved.query.end)
+        return self.cache.get_or_set(key, lambda: self._summary(period, resolved, group_by, filters, include_nat_volume))
 
     def _summary(
         self,
@@ -215,8 +231,6 @@ class DtoService:
         resolved: periods.ResolvedPeriod,
         group_by: str,
         filters: dict[str, list[str]],
-        metric: str,
-        include_discounts: bool,
         include_nat_volume: bool,
     ) -> Summary:
         q = resolved.query
@@ -226,17 +240,16 @@ class DtoService:
             data_window=None if q.is_empty else _window_out(q),
             previous_window=None if q.is_empty else _window_out(resolved.previous),
             group_by=group_by,
-            metric=metric,
-            include_discounts=include_discounts,
             include_nat_volume=include_nat_volume,
-            currency="USD",
-            total_cost=0.0,
             total_gb=0.0,
             egress_gb=0.0,
-            prev_total_cost=None,
+            ingress_gb=0.0,
+            transit_gb=0.0,
             prev_total_gb=None,
             prev_egress_gb=None,
-            by_type={t: Amount() for t in TRANSFER_TYPES},
+            prev_ingress_gb=None,
+            prev_transit_gb=None,
+            by_type={t: 0.0 for t in TRANSFER_TYPES},
             rows=[],
             series=[],
             volume_series=[],
@@ -259,12 +272,7 @@ class DtoService:
             ce_group.append({"Type": "COST_CATEGORY", "Key": group_by[14:]})
 
         results, attrs = self.ce.cost_and_usage(
-            q.start,
-            q.end,
-            q.granularity,
-            [metric, "UsageQuantity"],
-            self._filter_expr(usage_types, filters, include_discounts),
-            ce_group,
+            q.start, q.end, q.granularity, ["UsageQuantity"], self._filter_expr(usage_types, filters), ce_group
         )
 
         rows: dict[str, Row] = {}
@@ -279,12 +287,14 @@ class DtoService:
                 kind = usage_types.get(ut)
                 if kind is None:
                     continue
-                cost = float(g["Metrics"][metric]["Amount"])
                 gb = counted_gb(kind, float(g["Metrics"]["UsageQuantity"]["Amount"]), include_nat_volume)
-                result.currency = g["Metrics"][metric].get("Unit", result.currency)
+                if not gb:
+                    continue
 
                 if group_by == "TRANSFER_TYPE":
                     gkey = kind
+                elif group_by == "DIRECTION":
+                    gkey = DIRECTION[kind]
                 elif group_by == "USAGE_TYPE":
                     gkey = ut
                 else:
@@ -292,83 +302,68 @@ class DtoService:
 
                 row = rows.get(gkey)
                 if row is None:
-                    row = rows[gkey] = Row(key=gkey, label=self._label(group_by, gkey, attrs), cost=0, gb=0, pct=0, by_type={})
-                row.cost += cost
+                    row = rows[gkey] = Row(key=gkey, label=self._label(group_by, gkey, attrs), gb=0, pct=0, by_type={})
                 row.gb += gb
-                row.by_type[kind] = row.by_type.get(kind, 0.0) + cost
-                bucket[gkey] += cost
-                if gb:
-                    vbucket[kind] += gb
-                result.by_type[kind].cost += cost
-                result.by_type[kind].gb += gb
-                result.total_cost += cost
+                row.by_type[kind] = row.by_type.get(kind, 0.0) + gb
+                bucket[gkey] += gb
+                vbucket[kind] += gb
+                result.by_type[kind] += gb
                 result.total_gb += gb
-                if kind in EGRESS_TYPES:
-                    result.egress_gb += gb
 
+        result.egress_gb, result.ingress_gb, result.transit_gb = _by_direction(result.by_type)
         for row in rows.values():
-            row.pct = row.cost / result.total_cost * 100 if result.total_cost else 0.0
-        result.rows = sorted(rows.values(), key=lambda x: x.cost, reverse=True)
+            row.pct = row.gb / result.total_gb * 100 if result.total_gb else 0.0
+        result.rows = sorted(rows.values(), key=lambda x: x.gb, reverse=True)
         result.series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(series.items())]
         result.volume_series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(volume.items())]
 
-        result.prev_total_cost, result.prev_total_gb, result.prev_egress_gb = self._previous_totals(
-            resolved.previous, filters, metric, include_discounts, include_nat_volume
-        )
+        prev = self._previous_by_type(resolved.previous, filters, include_nat_volume)
+        result.prev_total_gb = sum(prev.values())
+        result.prev_egress_gb, result.prev_ingress_gb, result.prev_transit_gb = _by_direction(prev)
         return result
 
-    def _previous_totals(
-        self,
-        w: periods.Window,
-        filters: dict[str, list[str]],
-        metric: str,
-        include_discounts: bool,
-        include_nat_volume: bool,
-    ) -> tuple[float, float, float]:
-        """(cost, counted GB, egress GB) for the window. Grouped by usage type so volume follows the same rules."""
+    def _previous_by_type(
+        self, w: periods.Window, filters: dict[str, list[str]], include_nat_volume: bool
+    ) -> dict[str, float]:
+        """Counted GB per transfer type for the window, in one MONTHLY call grouped by usage type."""
         usage_types = self._filtered_usage_types(w.start, w.end, filters)
+        out: dict[str, float] = defaultdict(float)
         if not usage_types:
-            return 0.0, 0.0, 0.0
+            return out
         results, _ = self.ce.cost_and_usage(
             w.start,
             w.end,
             "MONTHLY",
-            [metric, "UsageQuantity"],
-            self._filter_expr(usage_types, filters, include_discounts),
+            ["UsageQuantity"],
+            self._filter_expr(usage_types, filters),
             [{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
         )
-        cost = gb = egress = 0.0
         for r in results:
             for g in r.get("Groups", []):
                 kind = usage_types.get(g["Keys"][0])
-                if kind is None:
-                    continue
-                cost += float(g["Metrics"][metric]["Amount"])
-                counted = counted_gb(kind, float(g["Metrics"]["UsageQuantity"]["Amount"]), include_nat_volume)
-                gb += counted
-                if kind in EGRESS_TYPES:
-                    egress += counted
-        return cost, gb, egress
+                if kind is not None:
+                    out[kind] += counted_gb(kind, float(g["Metrics"]["UsageQuantity"]["Amount"]), include_nat_volume)
+        return out
 
     def _filtered_usage_types(self, start: date, end: date, filters: dict[str, list[str]]) -> dict[str, str]:
         usage_types = self.dto_usage_types(start, end)
         if types := filters.get("TRANSFER_TYPE"):
             usage_types = {u: k for u, k in usage_types.items() if k in types}
+        if directions := filters.get("DIRECTION"):
+            usage_types = {u: k for u, k in usage_types.items() if DIRECTION[k] in directions}
         if uts := filters.get("USAGE_TYPE"):
             usage_types = {u: k for u, k in usage_types.items() if u in uts}
         return usage_types
 
     @staticmethod
-    def _filter_expr(
-        usage_types: dict[str, str], filters: dict[str, list[str]], include_discounts: bool = False
-    ) -> dict[str, Any]:
-        parts: list[dict[str, Any]] = [{"Dimensions": {"Key": "USAGE_TYPE", "Values": sorted(usage_types)}}]
-        if not include_discounts:
-            # Credits, refunds and EDP / private-rate discounts are booked as negative line items on the
-            # same usage types (often under another region), which skews per-group shares. Keep list-price usage only.
-            parts.append({"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Usage"]}})
+    def _filter_expr(usage_types: dict[str, str], filters: dict[str, list[str]]) -> dict[str, Any]:
+        parts: list[dict[str, Any]] = [
+            {"Dimensions": {"Key": "USAGE_TYPE", "Values": sorted(usage_types)}},
+            # Credits, refunds and discounts are booked on the same usage types with no volume; they would only add empty groups.
+            {"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Usage"]}},
+        ]
         for dim, values in sorted(filters.items()):
-            if dim in ("TRANSFER_TYPE", "USAGE_TYPE"):
+            if dim in ("TRANSFER_TYPE", "DIRECTION", "USAGE_TYPE"):
                 continue  # applied by narrowing the usage type list
             if dim.startswith("TAG:"):
                 parts.append(_keyed_filter("Tags", dim[4:], values))
@@ -425,9 +420,8 @@ class DtoService:
                 tag_keys=tag_keys,
                 cost_categories=cost_categories,
                 transfer_types=TRANSFER_TYPES,
-                transit_types=TRANSIT_TYPES,
+                directions=DIRECTION,
                 group_by_options=group_opts,
-                metrics=[Option(value=k, label=v) for k, v in METRICS.items()],
                 default_tag_key=None,
                 mock=self.mock,
             )

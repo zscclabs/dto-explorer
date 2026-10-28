@@ -47,11 +47,20 @@ export const theme = createTheme({
 // Fixed colour per transfer type so it reads the same in every chart.
 export const TRANSFER_TYPE_COLORS: Record<string, string> = {
   'Internet Out': '#6366F1',
-  'Inter-Region': '#F59E0B',
+  'Inter-Region Out': '#F59E0B',
+  'Other Out': '#94A3B8',
+  'Internet In': '#A855F7',
+  'Inter-Region In': '#F97316',
+  'Other In': '#CBD5E1',
   'Inter-AZ': '#10B981',
   'NAT Gateway': '#EF4444',
   'To CloudFront': '#06B6D4',
-  'Other Out': '#94A3B8',
+};
+
+export const DIRECTION_COLORS: Record<string, string> = {
+  Out: '#6366F1',
+  In: '#A855F7',
+  Transit: '#10B981',
 };
 
 export const SERIES_COLORS = ['#6366F1', '#14B8A6', '#F59E0B', '#EC4899', '#3B82F6', '#84CC16', '#A855F7', '#F97316'];
@@ -59,5 +68,6 @@ export const OTHER_COLOR = '#94A3B8';
 
 export function colorFor(groupBy: string, key: string, index: number): string {
   if (groupBy === 'TRANSFER_TYPE') return TRANSFER_TYPE_COLORS[key] ?? OTHER_COLOR;
+  if (groupBy === 'DIRECTION') return DIRECTION_COLORS[key] ?? OTHER_COLOR;
   return SERIES_COLORS[index % SERIES_COLORS.length];
 }

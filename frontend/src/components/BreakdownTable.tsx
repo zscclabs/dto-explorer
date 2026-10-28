@@ -6,7 +6,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { DataGrid, type GridColDef } from '@mui/x-data-grid';
 import type { Row, Summary } from '../api';
-import { bytes, money, pct, rate } from '../format';
+import { bytes, pct } from '../format';
 import { OTHER_COLOR, TRANSFER_TYPE_COLORS } from '../theme';
 
 interface Props {
@@ -17,7 +17,7 @@ interface Props {
   onDrill: (row: Row) => void;
 }
 
-function MixBar({ row, currency }: { row: Row; currency: string }) {
+function MixBar({ row }: { row: Row }) {
   const parts = Object.entries(row.by_type).filter(([, v]) => v > 0);
   return (
     <Tooltip
@@ -25,7 +25,7 @@ function MixBar({ row, currency }: { row: Row; currency: string }) {
         <Box>
           {parts.map(([t, v]) => (
             <div key={t}>
-              {t}: {money(v, currency)}
+              {t}: {bytes(v)}
             </div>
           ))}
         </Box>
@@ -33,7 +33,7 @@ function MixBar({ row, currency }: { row: Row; currency: string }) {
     >
       <Box sx={{ display: 'flex', height: 8, width: '100%', borderRadius: 4, overflow: 'hidden', gap: '1px' }}>
         {parts.map(([t, v]) => (
-          <Box key={t} sx={{ width: `${(v / row.cost) * 100}%`, bgcolor: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR }} />
+          <Box key={t} sx={{ width: `${(v / row.gb) * 100}%`, bgcolor: TRANSFER_TYPE_COLORS[t] ?? OTHER_COLOR }} />
         ))}
       </Box>
     </Tooltip>
@@ -41,7 +41,6 @@ function MixBar({ row, currency }: { row: Row; currency: string }) {
 }
 
 export default function BreakdownTable({ data, loading, groupLabel, drillHint, onDrill }: Props) {
-  const currency = data?.currency ?? 'USD';
   const columns: GridColDef<Row>[] = [
     {
       field: 'label',
@@ -61,26 +60,7 @@ export default function BreakdownTable({ data, loading, groupLabel, drillHint, o
         </Stack>
       ),
     },
-    {
-      field: 'cost',
-      headerName: 'Cost',
-      type: 'number',
-      flex: 0.7,
-      minWidth: 110,
-      valueFormatter: (v: number) => money(v, currency),
-    },
     { field: 'gb', headerName: 'Volume', type: 'number', flex: 0.7, minWidth: 110, valueFormatter: (v: number) => bytes(v) },
-    {
-      field: 'rate',
-      headerName: '$/GB',
-      type: 'number',
-      flex: 0.5,
-      minWidth: 90,
-      // Leave out NAT cost while NAT volume isn't counted, as the effective rate KPI does.
-      valueGetter: (_: unknown, row: Row) =>
-        row.gb ? (row.cost - (data?.include_nat_volume ? 0 : (row.by_type['NAT Gateway'] ?? 0))) / row.gb : 0,
-      valueFormatter: (v: number) => rate(v, currency),
-    },
     {
       field: 'pct',
       headerName: 'Share',
@@ -106,7 +86,7 @@ export default function BreakdownTable({ data, loading, groupLabel, drillHint, o
       disableExport: true,
       renderCell: ({ row }) => (
         <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-          <MixBar row={row} currency={currency} />
+          <MixBar row={row} />
         </Box>
       ),
     },
@@ -137,7 +117,7 @@ export default function BreakdownTable({ data, loading, groupLabel, drillHint, o
           toolbar: { csvOptions: { fileName: `dto-by-${groupLabel.toLowerCase().replace(/\W+/g, '-')}` }, printOptions: { disableToolbarButton: true } },
         }}
         initialState={{
-          sorting: { sortModel: [{ field: 'cost', sort: 'desc' }] },
+          sorting: { sortModel: [{ field: 'gb', sort: 'desc' }] },
           pagination: { paginationModel: { pageSize: 25 } },
         }}
         pageSizeOptions={[10, 25, 50, 100]}
