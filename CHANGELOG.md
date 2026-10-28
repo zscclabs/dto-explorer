@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
 ### Changed (breaking)
 - The app reports data transfer **volume only**. Cost, the cost-metric choice, the discounts switch, effective rate and $/GB are gone. The API no longer accepts `metric` or `include_discounts` (old links still load; the parameters are ignored), and `Summary` / `Row` no longer have cost fields. `by_type` is now GB per transfer type.
 - "Inter-Region" is renamed "Inter-Region Out".
