@@ -29,6 +29,7 @@ class Summary(BaseModel):
     previous_window: WindowOut | None
     group_by: str
     include_nat_volume: bool  # NAT Gateway GB counted (it duplicates the traffic it carries)
+    include_aws_internal: bool  # Inter-AZ, Inter-Region and To CloudFront counted; otherwise internet traffic only
     total_gb: float
     egress_gb: float  # direction Out: leaving AWS or crossing regions
     ingress_gb: float  # direction In: arriving from the internet or another region
@@ -58,6 +59,7 @@ class Meta(BaseModel):
     cost_categories: list[str]
     transfer_types: list[str]
     directions: dict[str, str]  # transfer type -> Out, In or Transit
+    aws_internal_types: list[str]  # hidden unless include_aws_internal
     group_by_options: list[Option]
     default_tag_key: str | None
     mock: bool

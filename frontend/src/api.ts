@@ -14,6 +14,7 @@ export interface Meta {
   tag_keys: string[];
   cost_categories: string[];
   transfer_types: string[];
+  aws_internal_types: string[]; // hidden unless includeAwsInternal
   directions: Record<string, Direction>; // transfer type -> direction
   group_by_options: Option[];
   default_tag_key: string | null;
@@ -41,6 +42,7 @@ export interface Summary {
   previous_window: Window | null;
   group_by: string;
   include_nat_volume: boolean;
+  include_aws_internal: boolean; // Inter-AZ, Inter-Region and To CloudFront counted
   total_gb: number;
   egress_gb: number; // Out: leaving AWS or crossing regions
   ingress_gb: number; // In: arriving from the internet or another region
@@ -63,6 +65,7 @@ export interface Query {
   end?: string;
   groupBy: string;
   includeNatVolume: boolean;
+  includeAwsInternal: boolean;
   filters: Filters;
 }
 
@@ -71,6 +74,7 @@ export function toSearchParams(q: Query): URLSearchParams {
   if (q.start) p.set('start', q.start);
   if (q.end && q.period === 'custom') p.set('end', q.end);
   if (q.includeNatVolume) p.set('include_nat_volume', 'true');
+  if (q.includeAwsInternal) p.set('include_aws_internal', 'true');
   for (const [dim, values] of Object.entries(q.filters)) {
     for (const v of values) p.append('filter', `${dim}=${v}`);
   }

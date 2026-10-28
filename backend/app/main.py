@@ -53,6 +53,7 @@ class SummaryParams:
         end: date | None = None,
         group_by: str = "REGION",
         include_nat_volume: bool = False,
+        include_aws_internal: bool = False,
         filters: Annotated[list[str], Query(alias="filter", description="Repeatable DIM=value, e.g. REGION=us-east-1")] = [],
     ):
         self.period = period
@@ -60,6 +61,7 @@ class SummaryParams:
         self.end = end
         self.group_by = group_by
         self.include_nat_volume = include_nat_volume
+        self.include_aws_internal = include_aws_internal
         self.filters = filters
 
     def run(self, service: DtoService) -> Summary:
@@ -70,6 +72,7 @@ class SummaryParams:
             self.group_by,
             parse_filters(self.filters),
             self.include_nat_volume,
+            self.include_aws_internal,
         )
 
 

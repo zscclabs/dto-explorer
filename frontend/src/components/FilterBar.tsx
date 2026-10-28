@@ -22,9 +22,11 @@ interface Props {
   meta: Meta | null;
   groupBy: string;
   includeNatVolume: boolean;
+  includeAwsInternal: boolean;
   filters: Filters;
   onGroupBy: (value: string) => void;
   onIncludeNatVolume: (value: boolean) => void;
+  onIncludeAwsInternal: (value: boolean) => void;
   onFilters: (value: Filters) => void;
   valueLabel: (dim: string, value: string) => string;
 }
@@ -77,7 +79,7 @@ function MultiSelect({
         );
       }}
       renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? '' : 'All'} />}
-      sx={{ minWidth: 220, flex: 1 }}
+      sx={{ minWidth: 170, flex: 1 }}
     />
   );
 }
@@ -86,9 +88,11 @@ export default function FilterBar({
   meta,
   groupBy,
   includeNatVolume,
+  includeAwsInternal,
   filters,
   onGroupBy,
   onIncludeNatVolume,
+  onIncludeAwsInternal,
   onFilters,
   valueLabel,
 }: Props) {
@@ -145,12 +149,21 @@ export default function FilterBar({
         />
         <MultiSelect
           label="Transfer types"
-          options={(meta?.transfer_types ?? []).map((t) => ({ value: t, label: t }))}
+          options={(meta?.transfer_types ?? [])
+            .filter((t) => includeAwsInternal || !meta?.aws_internal_types.includes(t))
+            .map((t) => ({ value: t, label: t }))}
           value={filters.TRANSFER_TYPE ?? []}
           onChange={(v) => setDim('TRANSFER_TYPE', v)}
           colors={TRANSFER_TYPE_COLORS}
         />
         <Stack sx={{ justifyContent: 'center' }}>
+          <Tooltip title="Off: only traffic to and from the internet. On: also Inter-AZ, Inter-Region Out and In, and To CloudFront, which stay on AWS's network.">
+            <FormControlLabel
+              control={<Switch checked={includeAwsInternal} onChange={(e) => onIncludeAwsInternal(e.target.checked)} />}
+              label="Include traffic within AWS"
+              sx={{ whiteSpace: 'nowrap', mr: 0 }}
+            />
+          </Tooltip>
           <Tooltip title="NAT Gateway bytes are traffic that is already counted as Internet Out or In, Inter-Region or Inter-AZ. Off: left out, so data isn't double-counted. On: added to Transit to show how much data goes through NAT gateways.">
             <FormControlLabel
               control={<Switch checked={includeNatVolume} onChange={(e) => onIncludeNatVolume(e.target.checked)} />}

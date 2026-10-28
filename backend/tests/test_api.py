@@ -30,6 +30,10 @@ def test_summary_endpoint(client):
     # Cost parameters from older links are ignored.
     r = client.get("/api/dto/summary", params={"period": "month", "start": "2026-09-01", "group_by": "DIRECTION", "metric": "AmortizedCost"})
     assert r.status_code == 200
+    assert r.json()["include_aws_internal"] is False
+    assert {row["key"] for row in r.json()["rows"]} == {"Out", "In"}
+
+    r = client.get("/api/dto/summary", params={"period": "month", "start": "2026-09-01", "group_by": "DIRECTION", "include_aws_internal": "true"})
     assert {row["key"] for row in r.json()["rows"]} == {"Out", "In", "Transit"}
 
 

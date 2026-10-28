@@ -7,6 +7,7 @@ from botocore.stub import ANY, Stubber
 from app.cache import Cache
 from app.ce_client import CostExplorer
 from app.dto_service import (
+    AWS_INTERNAL_TYPES,
     INTER_AZ,
     INTER_REGION_IN,
     INTER_REGION_OUT,
@@ -167,7 +168,9 @@ def test_summary_with_stubbed_cost_explorer():
 
     with stub:
         svc = DtoService(CostExplorer(client), Cache(0))
-        s = svc.summary("month", date(2026, 9, 15), None, "REGION", {"LINKED_ACCOUNT": ["111111111111"]}, today=TODAY)
+        s = svc.summary(
+            "month", date(2026, 9, 15), None, "REGION", {"LINKED_ACCOUNT": ["111111111111"]}, include_aws_internal=True, today=TODAY
+        )
         stub.assert_no_pending_responses()
 
     assert s.total_gb == pytest.approx(1350)
@@ -202,9 +205,15 @@ def test_group_by_totals_are_consistent(mock_service, group_by):
 
 
 def test_filters_narrow_results(mock_service):
-    full = mock_service.summary("week", date(2026, 10, 12), None, "REGION", {}, today=TODAY)
+    full = mock_service.summary("week", date(2026, 10, 12), None, "REGION", {}, include_aws_internal=True, today=TODAY)
     filtered = mock_service.summary(
-        "week", date(2026, 10, 12), None, "REGION", {"REGION": ["eu-west-1"], "TRANSFER_TYPE": [INTER_AZ]}, today=TODAY
+        "week",
+        date(2026, 10, 12),
+        None,
+        "REGION",
+        {"REGION": ["eu-west-1"], "TRANSFER_TYPE": [INTER_AZ]},
+        include_aws_internal=True,
+        today=TODAY,
     )
     assert [r.key for r in filtered.rows] == ["eu-west-1"]
     assert set(filtered.rows[0].by_type) == {INTER_AZ}
@@ -223,7 +232,7 @@ def test_meta(mock_service):
 
 
 def test_inbound_counted(mock_service):
-    s = mock_service.summary("month", date(2026, 9, 1), None, "DIRECTION", {}, today=TODAY)
+    s = mock_service.summary("month", date(2026, 9, 1), None, "DIRECTION", {}, include_aws_internal=True, today=TODAY)
     assert {r.key for r in s.rows} == {"Out", "In", "Transit"}
     assert [r.gb for r in s.rows] == sorted((r.gb for r in s.rows), reverse=True)
     assert s.ingress_gb == pytest.approx(s.by_type[INTERNET_IN] + s.by_type[INTER_REGION_IN] + s.by_type[OTHER_IN])
@@ -232,7 +241,7 @@ def test_inbound_counted(mock_service):
 
 
 def test_direction_filter(mock_service):
-    s = mock_service.summary("month", date(2026, 9, 1), None, "TRANSFER_TYPE", {"DIRECTION": ["In"]}, today=TODAY)
+    s = mock_service.summary("month", date(2026, 9, 1), None, "TRANSFER_TYPE", {"DIRECTION": ["In"]}, include_aws_internal=True, today=TODAY)
     assert {r.key for r in s.rows} == {INTERNET_IN, INTER_REGION_IN}
     assert s.total_gb == pytest.approx(s.ingress_gb)
     assert s.egress_gb == 0 and s.transit_gb == 0
@@ -251,3 +260,21 @@ def test_nat_volume_excluded_by_default(mock_service):
     assert (with_nat.egress_gb, with_nat.ingress_gb) == pytest.approx((s.egress_gb, s.ingress_gb))
     assert with_nat.prev_transit_gb > s.prev_transit_gb
     assert with_nat.prev_egress_gb == pytest.approx(s.prev_egress_gb)
+
+
+def test_internet_only_by_default(mock_service):
+    s = mock_service.summary("month", date(2026, 9, 1), None, "TRANSFER_TYPE", {}, today=TODAY)
+    full = mock_service.summary("month", date(2026, 9, 1), None, "TRANSFER_TYPE", {}, include_aws_internal=True, today=TODAY)
+
+    assert not s.include_aws_internal and full.include_aws_internal
+    assert {r.key for r in s.rows} == {INTERNET_OUT, INTERNET_IN}
+    assert all(s.by_type[t] == 0 for t in AWS_INTERNAL_TYPES)
+    assert s.transit_gb == 0 and s.prev_transit_gb == 0
+    assert s.egress_gb == pytest.approx(full.by_type[INTERNET_OUT] + full.by_type[OTHER_OUT])
+    assert s.ingress_gb == pytest.approx(full.by_type[INTERNET_IN] + full.by_type[OTHER_IN])
+    assert s.prev_egress_gb < full.prev_egress_gb
+    assert all(full.by_type[t] > 0 for t in AWS_INTERNAL_TYPES)
+
+    # NAT keeps its own switch: with internal traffic hidden, transit is NAT only.
+    nat = mock_service.summary("month", date(2026, 9, 1), None, "TRANSFER_TYPE", {}, include_nat_volume=True, today=TODAY)
+    assert nat.transit_gb == pytest.approx(nat.by_type[NAT_GATEWAY]) and nat.transit_gb > 0
