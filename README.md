@@ -7,7 +7,7 @@ A web app that totals **AWS data transfer volume** (GB) for a week, a month or a
 - **License:** MIT (see [LICENSE](LICENSE))
 - **Packaging:** one Docker image (FastAPI serves both the API and the built UI), published to GHCR when a release is tagged
 
-![DTO Explorer dashboard: KPIs, data volume over time, share by region and by transfer type](docs/dto-explore.png)
+![DTO Explorer dashboard: internet egress and ingress KPIs, data volume over time and share by region and by transfer type (mock data)](docs/dto-explore.png)
 
 ## Contents
 - [Features](#features)
