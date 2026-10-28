@@ -1,13 +1,13 @@
 # DTO Explorer
 
-A web app that totals **AWS Data Transfer Out (DTO)** cost and volume for a week, a month or a custom date range, and breaks it down by region, account, transfer type, service, usage type, cost allocation tag (for example a VPC tag) or cost category.
+A web app that totals **AWS data transfer volume** (GB) in both directions for a week, a month or a custom date range: egress leaving AWS, ingress arriving in AWS, and transit inside AWS. It breaks the volume down by region, account, direction, transfer type, service, usage type, cost allocation tag (for example a VPC tag) or cost category. It reports volume only, not cost.
 
 - **Backend:** Python, FastAPI and boto3, with AWS Cost Explorer as the data source
 - **Frontend:** React 19, Vite, MUI v7 and MUI X (Charts, DataGrid, Date Pickers), with light and dark mode
 - **License:** MIT (see [LICENSE](LICENSE))
 - **Packaging:** one Docker image (FastAPI serves both the API and the built UI), published to GHCR when a release is tagged
 
-![DTO Explorer dashboard: KPIs, cost and data volume over time, share by region and by transfer type](docs/dto-explore.png)
+![DTO Explorer dashboard: KPIs, data volume over time, share by region and by transfer type](docs/dto-explore.png)
 
 ## Contents
 - [Features](#features)
@@ -17,15 +17,15 @@ A web app that totals **AWS Data Transfer Out (DTO)** cost and volume for a week
 - [Configuration](#configuration)
 - [Development](#development)
 - [Releasing](#releasing)
-- [How DTO is identified](#how-dto-is-identified)
+- [How traffic is classified](#how-traffic-is-classified)
 - [API](#api)
 
 ## Features
 - **Periods:** weekly (Monday–Sunday) or monthly with previous/next navigation, or a custom range with presets (last 7/30/90 days, year to date, last 12 months)
-- **Headline numbers:** total cost, total volume, cost per GB and top contributor. Cost and volume show the change against the previous period of the same length.
-- **Charts and table:** stacked daily or monthly cost chart, share donut, and a sortable, searchable table with click-to-drill-down
-- **Filters:** account, region and transfer type, plus drill-down filters on any dimension
-- **Other:** CSV export, shareable URLs, a choice of cost metric (unblended, amortized, net and so on), a [discounts and credits](#discounts-and-credits) switch, and a mock-data mode that needs no AWS account
+- **Headline numbers:** egress, ingress and transit volume, each with the change against the previous period of the same length, plus the top contributor
+- **Charts and table:** stacked daily or monthly volume charts by breakdown and by transfer type, share donuts, and a sortable, searchable table with click-to-drill-down
+- **Filters:** account, region, direction and transfer type, plus drill-down filters on any dimension
+- **Other:** CSV export, shareable URLs, an [Include NAT volume](#avoiding-double-counting) switch, and a mock-data mode that needs no AWS account
 
 ## Requirements
 
@@ -92,15 +92,12 @@ The UI shows an AWS error. Run `aws sso login --profile my-profile` again. You d
 }
 ```
 
-### Cost
+### Cost Explorer API charges
 Each Cost Explorer request costs **$0.01**. One dashboard view makes about 12 requests on a cold cache. Responses are cached in memory for 1 hour (`DTO_CACHE_TTL_SECONDS`). The ↻ button in the UI clears the cache and fetches fresh data.
-
-### Discounts and credits
-By default the app shows **usage charges at list price** (Cost Explorer `RECORD_TYPE = Usage`). AWS books credits, refunds and EDP / private-rate discounts as separate negative charges, often under no region, so including them would produce negative groups and shares above 100%. Turn on **Include discounts & credits** to see net cost instead. Volume (GB) is the same either way.
 
 ### Per-VPC breakdown
 Cost Explorer has **no VPC dimension**. To get a per-VPC breakdown:
-1. Tag resources that generate transfer charges (NAT gateways, load balancers, EC2 instances, etc.) with something like `vpc=<name>`. An existing `Name` tag works if your resources are named after their VPC.
+1. Tag resources that generate data transfer (NAT gateways, load balancers, EC2 instances, etc.) with something like `vpc=<name>`. An existing `Name` tag works if your resources are named after their VPC.
 2. Activate that tag as a **cost allocation tag** in Billing → Cost allocation tags. In an Organization, only the management account can do this. Data appears from the activation date onward.
 3. Choose **Tag: vpc** under "Break down by", or set `DTO_DEFAULT_TAG_KEY=vpc` to make it the default.
 
@@ -123,7 +120,7 @@ Set these as environment variables or in `backend/.env`, which git ignores.
 backend/
   app/
     main.py          FastAPI routes; serves frontend/dist when it exists
-    dto_service.py   finds DTO usage types, classifies them, builds Cost Explorer queries, aggregates
+    dto_service.py   finds data transfer usage types, classifies them, builds Cost Explorer queries, aggregates GB
     ce_client.py     boto3 Cost Explorer wrapper (pagination)
     periods.py       week / month / custom → date windows
     mock_ce.py       synthetic Cost Explorer client for DTO_MOCK=1
@@ -167,33 +164,36 @@ Tags with a suffix, such as `v0.3.0-rc.1`, are published as pre-releases and don
 
 **First release only:** after the image is pushed, open the package's settings on GitHub (your profile or org → Packages) and set its visibility. If the repository is private, the package is private too.
 
-## How DTO is identified
+## How traffic is classified
 
-Usage types are discovered with `GetDimensionValues` and then classified:
+The app finds usage types with `GetDimensionValues`, sorts them into transfer types and directions, and adds up their `UsageQuantity` (GB). It never requests cost metrics. It counts only `RECORD_TYPE = Usage` rows: credits and discounts carry no volume and would only add empty groups.
 
-| Transfer type | Usage type pattern | Role |
+| Direction | Transfer type | Usage type pattern |
 |---|---|---|
-| Internet Out | `*DataTransfer-Out-Bytes` (includes CloudFront edge egress) | Egress |
-| Inter-Region | `<SRC>-<DST>-AWS-Out-Bytes` | Egress |
-| Other Out | anything else ending in `Out-Bytes`, `Out-OBytes` or `Out-ABytes` | Egress |
-| Inter-AZ | `*DataTransfer-Regional-Bytes` | Transit |
-| NAT Gateway | `*NatGateway-Bytes` (data processing) | Transit (processing fee) |
-| To CloudFront | `*CloudFront-Out-Bytes` | Transit |
+| Out | Internet Out | `*DataTransfer-Out-Bytes` (includes CloudFront edge egress) |
+| Out | Inter-Region Out | `<SRC>-<DST>-AWS-Out-Bytes` |
+| Out | Other Out | anything else containing `Out-Bytes`, `Out-OBytes` or `Out-ABytes` |
+| In | Internet In | `*DataTransfer-In-Bytes` |
+| In | Inter-Region In | `<SRC>-<DST>-AWS-In-Bytes` |
+| In | Other In | anything else containing `In-Bytes`, `In-OBytes` or `In-ABytes` |
+| Transit | Inter-AZ | `*DataTransfer-Regional-Bytes` |
+| Transit | NAT Gateway | `*NatGateway-Bytes` (data processed) |
+| Transit | To CloudFront | `*CloudFront-Out-Bytes` |
 
-Inbound usage types (`*-In-*`) are excluded. You can narrow the result to particular transfer types with the filter.
+AWS doesn't charge for inbound transfer from the internet or for the receiving side of inter-region transfer, but it still reports the volume, so the app counts it. Filter or break down by **Direction** to separate Out, In and Transit.
 
 ### Avoiding double-counting
-Every charge above is real money, so **cost** is never double-counted. **Volume** can be. Take 100 GB that goes from an instance through a NAT gateway in another AZ out to the internet. AWS bills it as:
+The same bytes can be reported under more than one usage type. Take 100 GB that goes from an instance through a NAT gateway in another AZ out to the internet. AWS reports it as:
 
-- Inter-AZ: 200 GB, because Inter-AZ is billed on both the sending and the receiving side
-- NAT Gateway data processing: 100 GB
+- Inter-AZ: 200 GB, because Inter-AZ is counted on both the sending and the receiving side
+- NAT Gateway data processed: 100 GB
 - Internet Out: 100 GB
 
 That adds up to about 400 GB of usage for 100 GB that actually left AWS. The app handles this as follows:
 
-- **NAT Gateway** cost is always counted. Its volume is left out of every GB figure unless you turn on **Include NAT volume** (`include_nat_volume=true`). The effective rate leaves NAT cost out while NAT volume is excluded.
-- **Egress** (`egress_gb`, shown under "Data transferred") counts only Internet Out, Inter-Region and Other Out: the bytes that leave AWS or cross regions.
-- **Transit** types (Inter-AZ, NAT Gateway, To CloudFront) move data inside AWS. Their bytes show up again under an egress type, or, for Inter-AZ, twice. The volume charts label them "(transit)".
+- **Egress** and **Ingress** count each byte once, at the point where it leaves or enters AWS or crosses regions.
+- **Transit** types move data inside AWS. Their bytes show up again under an Out or In type, or, for Inter-AZ, twice. The UI shows them as a separate total and labels them "(transit)" in the volume charts.
+- **NAT Gateway** volume is left out by default because it duplicates the traffic it carries, in both directions. Turn on **Include NAT volume** (`include_nat_volume=true`) to add it to Transit.
 
 ## API
 
@@ -201,11 +201,11 @@ Interactive docs are at `/docs` while the app is running.
 
 - `GET /api/health`: status and version
 - `GET /api/meta`: accounts, regions, tag keys, cost categories and breakdown options
-- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&metric=UnblendedCost&include_discounts=false&include_nat_volume=false&filter=REGION=us-east-1&filter=TAG:vpc=prod`
+- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&include_nat_volume=false&filter=REGION=us-east-1&filter=TAG:vpc=prod`
   - `week` and `month` take the period containing `start` (today by default). `custom` uses `start` to `end`, both inclusive.
-  - `group_by`: `REGION`, `LINKED_ACCOUNT`, `SERVICE`, `TRANSFER_TYPE`, `USAGE_TYPE`, `TAG:<key>` or `COST_CATEGORY:<name>`
-  - `include_discounts`: `false` (default) for list-price usage, `true` for net of credits and discounts
-  - `include_nat_volume`: `false` (default) leaves NAT Gateway data processing out of volume figures (its cost is still counted), `true` adds it back
+  - `group_by`: `REGION`, `LINKED_ACCOUNT`, `SERVICE`, `DIRECTION`, `TRANSFER_TYPE`, `USAGE_TYPE`, `TAG:<key>` or `COST_CATEGORY:<name>`
+  - `include_nat_volume`: `false` (default) leaves NAT Gateway data processed out of every total, `true` adds it to transit
+  - All figures are GB. `DIRECTION` (`Out`, `In`, `Transit`) works as a breakdown and as a filter.
   - `filter` can be repeated. Values for the same dimension are OR'd and different dimensions are AND'd. An empty tag value (`TAG:vpc=`) means untagged.
-- `GET /api/dto/export.csv`: same parameters, returns a CSV file
+- `GET /api/dto/export.csv`: same parameters, returns a CSV file with GB per row and per transfer type
 - `POST /api/cache/clear`

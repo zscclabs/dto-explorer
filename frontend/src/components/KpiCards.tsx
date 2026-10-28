@@ -10,12 +10,12 @@ import Typography from '@mui/material/Typography';
 import TrendingDownRounded from '@mui/icons-material/TrendingDownRounded';
 import TrendingUpRounded from '@mui/icons-material/TrendingUpRounded';
 import type { Summary } from '../api';
-import { bytes, deltaPct, money, pct, rangeLabel, rate } from '../format';
+import { bytes, deltaPct, pct, rangeLabel } from '../format';
 import { OTHER_COLOR, TRANSFER_TYPE_COLORS } from '../theme';
 
 function Delta({ value, previousLabel }: { value: number | null; previousLabel: string }) {
   if (value === null) return null;
-  // For spend, going up is bad.
+  // More traffic usually means more spend, so going up is flagged.
   const up = value >= 0;
   return (
     <Tooltip title={`vs ${previousLabel}`}>
@@ -66,42 +66,46 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
   }
 
   const prevLabel = data.previous_window ? rangeLabel(data.previous_window.start, data.previous_window.end) : '';
-  // NAT cost has no counted volume unless NAT volume is included, so leave it out of $/GB.
-  const natCost = data.include_nat_volume ? 0 : (data.by_type['NAT Gateway']?.cost ?? 0);
-  const perGb = data.total_gb ? (data.total_cost - natCost) / data.total_gb : 0;
-  const egressDelta = deltaPct(data.egress_gb, data.prev_egress_gb);
   const top = data.rows[0];
-  const mix = Object.entries(data.by_type).filter(([, a]) => a.cost > 0);
+  const mix = Object.entries(data.by_type).filter(([, gb]) => gb > 0);
+  const tiles = [
+    {
+      title: 'Egress',
+      gb: data.egress_gb,
+      prev: data.prev_egress_gb,
+      help: 'Out: leaving AWS to the internet or crossing regions (Internet Out, Inter-Region Out, Other Out).',
+    },
+    {
+      title: 'Ingress',
+      gb: data.ingress_gb,
+      prev: data.prev_ingress_gb,
+      help: 'In: arriving from the internet or another region (Internet In, Inter-Region In, Other In). AWS does not charge for it.',
+    },
+    {
+      title: 'Transit inside AWS',
+      gb: data.transit_gb,
+      prev: data.prev_transit_gb,
+      help: `Inter-AZ (billed on both sides, so about 2x the bytes moved), To CloudFront${data.include_nat_volume ? ' and NAT Gateway' : ''}. These bytes also appear under another type.`,
+    },
+  ];
 
   return (
     <Stack spacing={2}>
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          <Kpi
-            title="Total DTO cost"
-            value={money(data.total_cost, data.currency)}
-            delta={<Delta value={deltaPct(data.total_cost, data.prev_total_cost)} previousLabel={prevLabel} />}
-            sub={data.prev_total_cost !== null ? `${money(data.prev_total_cost, data.currency)} previous period` : 'No data in range'}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          <Kpi
-            title="Data transferred"
-            value={bytes(data.total_gb)}
-            delta={<Delta value={deltaPct(data.total_gb, data.prev_total_gb)} previousLabel={prevLabel} />}
-            sub={
-              <Tooltip title="Egress: Internet Out, Inter-Region and Other Out. The rest is transit inside AWS.">
-                <span>
-                  {bytes(data.egress_gb)} leaving AWS
-                  {egressDelta !== null && ` (${egressDelta >= 0 ? '+' : ''}${egressDelta.toFixed(1)}%)`}
-                </span>
-              </Tooltip>
-            }
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          <Kpi title="Effective rate" value={rate(perGb, data.currency)} sub={`per GB · ${money(perGb * 1024, data.currency)} per TB`} />
-        </Grid>
+        {tiles.map((t) => (
+          <Grid key={t.title} size={{ xs: 12, sm: 6, lg: 3 }}>
+            <Kpi
+              title={t.title}
+              value={bytes(t.gb)}
+              delta={<Delta value={deltaPct(t.gb, t.prev)} previousLabel={prevLabel} />}
+              sub={
+                <Tooltip title={t.help}>
+                  <span>{t.prev !== null ? `${bytes(t.prev)} previous period` : 'No data in range'}</span>
+                </Tooltip>
+              }
+            />
+          </Grid>
+        ))}
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <Kpi
             title={`Top ${groupLabel.toLowerCase()}`}
@@ -110,7 +114,7 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
                 {top?.label ?? '—'}
               </Box>
             }
-            sub={top ? `${money(top.cost, data.currency)} · ${pct(top.pct)} of total` : undefined}
+            sub={top ? `${bytes(top.gb)} · ${pct(top.pct)} of total` : undefined}
           />
         </Grid>
       </Grid>
@@ -118,27 +122,27 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
       {mix.length > 0 && (
         <Paper sx={{ p: 2.5 }}>
           <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-            Transfer type mix
+            Transfer type mix · {bytes(data.total_gb)}
           </Typography>
           <Box sx={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', gap: '2px' }}>
-            {mix.map(([type, a]) => (
-              <Tooltip key={type} title={`${type}: ${money(a.cost, data.currency)} · ${type === 'NAT Gateway' && !data.include_nat_volume ? 'volume not counted' : bytes(a.gb)}`}>
-                <Box sx={{ width: `${(a.cost / data.total_cost) * 100}%`, bgcolor: TRANSFER_TYPE_COLORS[type] ?? OTHER_COLOR, minWidth: 3 }} />
+            {mix.map(([type, gb]) => (
+              <Tooltip key={type} title={`${type}: ${bytes(gb)}`}>
+                <Box sx={{ width: `${(gb / data.total_gb) * 100}%`, bgcolor: TRANSFER_TYPE_COLORS[type] ?? OTHER_COLOR, minWidth: 3 }} />
               </Tooltip>
             ))}
           </Box>
           <Stack direction="row" sx={{ flexWrap: 'wrap', columnGap: 3, rowGap: 1, mt: 1.5 }}>
-            {mix.map(([type, a]) => (
+            {mix.map(([type, gb]) => (
               <Stack key={type} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Box sx={{ width: 10, height: 10, borderRadius: '3px', bgcolor: TRANSFER_TYPE_COLORS[type] ?? OTHER_COLOR }} />
                 <Typography variant="body2" color="text.secondary">
                   {type}
                 </Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                  {money(a.cost, data.currency)}
+                  {bytes(gb)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  ({pct((a.cost / data.total_cost) * 100)})
+                  ({pct((gb / data.total_gb) * 100)})
                 </Typography>
               </Stack>
             ))}

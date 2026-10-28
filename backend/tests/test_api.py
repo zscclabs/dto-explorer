@@ -25,7 +25,12 @@ def test_summary_endpoint(client):
 
     r = client.get("/api/dto/summary", params={"period": "month", "start": "2026-09-01", "include_nat_volume": "true"})
     assert r.json()["include_nat_volume"] is True
-    assert r.json()["by_type"]["NAT Gateway"]["gb"] > 0
+    assert r.json()["by_type"]["NAT Gateway"] > 0
+
+    # Cost parameters from older links are ignored.
+    r = client.get("/api/dto/summary", params={"period": "month", "start": "2026-09-01", "group_by": "DIRECTION", "metric": "AmortizedCost"})
+    assert r.status_code == 200
+    assert {row["key"] for row in r.json()["rows"]} == {"Out", "In", "Transit"}
 
 
 def test_bad_params_return_400(client):
@@ -39,5 +44,5 @@ def test_csv_export(client):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/csv")
     lines = r.text.strip().splitlines()
-    assert lines[0].startswith("TRANSFER_TYPE,label,cost_usd,gb,pct")
+    assert lines[0].startswith("TRANSFER_TYPE,label,gb,pct,gb_Internet Out")
     assert len(lines) > 1

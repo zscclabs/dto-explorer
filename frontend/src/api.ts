@@ -1,5 +1,6 @@
 export type Period = 'week' | 'month' | 'custom';
 export type Filters = Record<string, string[]>;
+export type Direction = 'Out' | 'In' | 'Transit';
 
 export interface Option {
   value: string;
@@ -13,9 +14,8 @@ export interface Meta {
   tag_keys: string[];
   cost_categories: string[];
   transfer_types: string[];
-  transit_types: string[]; // move data inside AWS rather than out of it
+  directions: Record<string, Direction>; // transfer type -> direction
   group_by_options: Option[];
-  metrics: Option[];
   default_tag_key: string | null;
   mock: boolean;
 }
@@ -29,10 +29,9 @@ export interface Window {
 export interface Row {
   key: string;
   label: string;
-  cost: number;
   gb: number;
-  pct: number;
-  by_type: Record<string, number>;
+  pct: number; // share of total_gb
+  by_type: Record<string, number>; // transfer type -> GB
 }
 
 export interface Summary {
@@ -41,19 +40,18 @@ export interface Summary {
   data_window: Window | null;
   previous_window: Window | null;
   group_by: string;
-  metric: string;
-  include_discounts: boolean;
   include_nat_volume: boolean;
-  currency: string;
-  total_cost: number;
   total_gb: number;
-  egress_gb: number; // bytes leaving AWS or crossing regions
-  prev_total_cost: number | null;
+  egress_gb: number; // Out: leaving AWS or crossing regions
+  ingress_gb: number; // In: arriving from the internet or another region
+  transit_gb: number; // moving inside AWS
   prev_total_gb: number | null;
   prev_egress_gb: number | null;
-  by_type: Record<string, { cost: number; gb: number }>;
+  prev_ingress_gb: number | null;
+  prev_transit_gb: number | null;
+  by_type: Record<string, number>; // transfer type -> GB
   rows: Row[];
-  series: { date: string; values: Record<string, number> }[];
+  series: { date: string; values: Record<string, number> }[]; // row key -> GB
   volume_series: { date: string; values: Record<string, number> }[]; // transfer type -> GB
   estimated: boolean;
   mock: boolean;
@@ -64,17 +62,14 @@ export interface Query {
   start?: string;
   end?: string;
   groupBy: string;
-  metric: string;
-  includeDiscounts: boolean;
   includeNatVolume: boolean;
   filters: Filters;
 }
 
 export function toSearchParams(q: Query): URLSearchParams {
-  const p = new URLSearchParams({ period: q.period, group_by: q.groupBy, metric: q.metric });
+  const p = new URLSearchParams({ period: q.period, group_by: q.groupBy });
   if (q.start) p.set('start', q.start);
   if (q.end && q.period === 'custom') p.set('end', q.end);
-  if (q.includeDiscounts) p.set('include_discounts', 'true');
   if (q.includeNatVolume) p.set('include_nat_volume', 'true');
   for (const [dim, values] of Object.entries(q.filters)) {
     for (const v of values) p.append('filter', `${dim}=${v}`);

@@ -14,24 +14,22 @@ import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import FilterAltOffRounded from '@mui/icons-material/FilterAltOffRounded';
 import type { Filters, Meta, Option } from '../api';
-import { TRANSFER_TYPE_COLORS } from '../theme';
+import { DIRECTION_COLORS, TRANSFER_TYPE_COLORS } from '../theme';
+
+const DIRECTIONS = ['Out', 'In', 'Transit'];
 
 interface Props {
   meta: Meta | null;
   groupBy: string;
-  metric: string;
-  includeDiscounts: boolean;
   includeNatVolume: boolean;
   filters: Filters;
   onGroupBy: (value: string) => void;
-  onMetric: (value: string) => void;
-  onIncludeDiscounts: (value: boolean) => void;
   onIncludeNatVolume: (value: boolean) => void;
   onFilters: (value: Filters) => void;
   valueLabel: (dim: string, value: string) => string;
 }
 
-const MAIN_DIMS = ['LINKED_ACCOUNT', 'REGION', 'TRANSFER_TYPE'];
+const MAIN_DIMS = ['LINKED_ACCOUNT', 'REGION', 'DIRECTION', 'TRANSFER_TYPE'];
 
 export function dimLabel(meta: Meta | null, dim: string): string {
   return meta?.group_by_options.find((o) => o.value === dim)?.label ?? dim;
@@ -87,13 +85,9 @@ function MultiSelect({
 export default function FilterBar({
   meta,
   groupBy,
-  metric,
-  includeDiscounts,
   includeNatVolume,
   filters,
   onGroupBy,
-  onMetric,
-  onIncludeDiscounts,
   onIncludeNatVolume,
   onFilters,
   valueLabel,
@@ -143,31 +137,21 @@ export default function FilterBar({
           onChange={(v) => setDim('REGION', v)}
         />
         <MultiSelect
+          label="Direction"
+          options={DIRECTIONS.map((d) => ({ value: d, label: d }))}
+          value={filters.DIRECTION ?? []}
+          onChange={(v) => setDim('DIRECTION', v)}
+          colors={DIRECTION_COLORS}
+        />
+        <MultiSelect
           label="Transfer types"
           options={(meta?.transfer_types ?? []).map((t) => ({ value: t, label: t }))}
           value={filters.TRANSFER_TYPE ?? []}
           onChange={(v) => setDim('TRANSFER_TYPE', v)}
           colors={TRANSFER_TYPE_COLORS}
         />
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel id="metric">Cost metric</InputLabel>
-          <Select labelId="metric" label="Cost metric" value={metric} onChange={(e) => onMetric(e.target.value)}>
-            {(meta?.metrics ?? [{ value: 'UnblendedCost', label: 'Unblended cost' }]).map((o) => (
-              <MenuItem key={o.value} value={o.value}>
-                {o.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
         <Stack sx={{ justifyContent: 'center' }}>
-          <Tooltip title="Off: list-price usage charges only, so every breakdown adds up to 100%. On: net of credits, refunds and EDP / private-rate discounts, which AWS books as negative charges and can show as negative groups.">
-            <FormControlLabel
-              control={<Switch checked={includeDiscounts} onChange={(e) => onIncludeDiscounts(e.target.checked)} />}
-              label="Include discounts & credits"
-              sx={{ whiteSpace: 'nowrap', mr: 0 }}
-            />
-          </Tooltip>
-          <Tooltip title="NAT Gateway bytes are a processing fee on traffic that is already billed as Internet Out, Inter-Region or Inter-AZ. Off: NAT cost is counted but its volume is not, so data isn't double-counted. On: add NAT volume back to see how much data goes through NAT gateways.">
+          <Tooltip title="NAT Gateway bytes are traffic that is already counted as Internet Out or In, Inter-Region or Inter-AZ. Off: left out, so data isn't double-counted. On: added to Transit to show how much data goes through NAT gateways.">
             <FormControlLabel
               control={<Switch checked={includeNatVolume} onChange={(e) => onIncludeNatVolume(e.target.checked)} />}
               label="Include NAT volume"

@@ -9,23 +9,17 @@ class WindowOut(BaseModel):
     granularity: str
 
 
-class Amount(BaseModel):
-    cost: float = 0.0
-    gb: float = 0.0
-
-
 class Row(BaseModel):
     key: str
     label: str
-    cost: float
     gb: float
-    pct: float
-    by_type: dict[str, float]  # cost per transfer type
+    pct: float  # share of total_gb
+    by_type: dict[str, float]  # GB per transfer type
 
 
 class SeriesPoint(BaseModel):
     date: date
-    values: dict[str, float]  # row key -> cost
+    values: dict[str, float]  # row key or transfer type -> GB
 
 
 class Summary(BaseModel):
@@ -34,19 +28,18 @@ class Summary(BaseModel):
     data_window: WindowOut | None  # portion of the window that can have data
     previous_window: WindowOut | None
     group_by: str
-    metric: str
-    include_discounts: bool
-    include_nat_volume: bool  # NAT Gateway GB counted in volume figures (its cost always is)
-    currency: str
-    total_cost: float
+    include_nat_volume: bool  # NAT Gateway GB counted (it duplicates the traffic it carries)
     total_gb: float
-    egress_gb: float  # GB of EGRESS_TYPES only: bytes leaving AWS or crossing regions
-    prev_total_cost: float | None
+    egress_gb: float  # direction Out: leaving AWS or crossing regions
+    ingress_gb: float  # direction In: arriving from the internet or another region
+    transit_gb: float  # moving inside AWS (Inter-AZ, NAT Gateway, To CloudFront)
     prev_total_gb: float | None
     prev_egress_gb: float | None
-    by_type: dict[str, Amount]
+    prev_ingress_gb: float | None
+    prev_transit_gb: float | None
+    by_type: dict[str, float]  # GB per transfer type
     rows: list[Row]
-    series: list[SeriesPoint]
+    series: list[SeriesPoint]  # row key -> GB
     volume_series: list[SeriesPoint]  # transfer type -> GB
     estimated: bool
     mock: bool
@@ -64,8 +57,7 @@ class Meta(BaseModel):
     tag_keys: list[str]
     cost_categories: list[str]
     transfer_types: list[str]
-    transit_types: list[str]  # transfer types that move data inside AWS rather than out of it
+    directions: dict[str, str]  # transfer type -> Out, In or Transit
     group_by_options: list[Option]
-    metrics: list[Option]
     default_tag_key: str | None
     mock: bool

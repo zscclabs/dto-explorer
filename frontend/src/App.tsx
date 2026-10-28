@@ -31,8 +31,6 @@ import { rangeLabel } from './format';
 
 interface ViewState extends PeriodValue {
   groupBy: string;
-  metric: string;
-  includeDiscounts: boolean;
   includeNatVolume: boolean;
   filters: Filters;
 }
@@ -53,8 +51,6 @@ function readUrl(): ViewState {
     start: p.get('start') ?? dayjs().subtract(30, 'day').format('YYYY-MM-DD'),
     end: p.get('end') ?? dayjs().subtract(1, 'day').format('YYYY-MM-DD'),
     groupBy: p.get('group_by') ?? 'REGION',
-    metric: p.get('metric') ?? 'UnblendedCost',
-    includeDiscounts: p.get('include_discounts') === 'true',
     includeNatVolume: p.get('include_nat_volume') === 'true',
     filters,
   };
@@ -66,8 +62,6 @@ function toQuery(s: ViewState): Query {
     start: s.period === 'custom' ? s.start : s.anchor,
     end: s.period === 'custom' ? s.end : undefined,
     groupBy: s.groupBy,
-    metric: s.metric,
-    includeDiscounts: s.includeDiscounts,
     includeNatVolume: s.includeNatVolume,
     filters: s.filters,
   };
@@ -77,6 +71,7 @@ function toQuery(s: ViewState): Query {
 function nextDimension(groupBy: string): string | null {
   if (groupBy === 'REGION') return 'LINKED_ACCOUNT';
   if (groupBy === 'LINKED_ACCOUNT') return 'TRANSFER_TYPE';
+  if (groupBy === 'DIRECTION') return 'TRANSFER_TYPE';
   if (groupBy === 'TRANSFER_TYPE') return 'USAGE_TYPE';
   if (groupBy === 'USAGE_TYPE') return 'LINKED_ACCOUNT';
   if (groupBy.startsWith('COST_CATEGORY:')) return 'LINKED_ACCOUNT';
@@ -188,7 +183,7 @@ export default function App() {
               DTO Explorer
             </Typography>
             <Typography variant="caption" color="text.secondary" noWrap component="div">
-              AWS data transfer out · Cost Explorer
+              AWS data transfer volume · Cost Explorer
             </Typography>
           </Box>
           {meta?.mock && <Chip size="small" color="warning" label="Mock data" />}
@@ -215,13 +210,9 @@ export default function App() {
               <FilterBar
                 meta={meta}
                 groupBy={view.groupBy}
-                metric={view.metric}
-                includeDiscounts={view.includeDiscounts}
                 includeNatVolume={view.includeNatVolume}
                 filters={view.filters}
                 onGroupBy={(groupBy) => update({ groupBy })}
-                onMetric={(metric) => update({ metric })}
-                onIncludeDiscounts={(includeDiscounts) => update({ includeDiscounts })}
                 onIncludeNatVolume={(includeNatVolume) => update({ includeNatVolume })}
                 onFilters={(filters) => update({ filters })}
                 valueLabel={valueLabel}
@@ -246,8 +237,8 @@ export default function App() {
 
           {view.groupBy.startsWith('TAG:') && (
             <Alert severity="info" variant="outlined">
-              Tag breakdowns only include resources carrying the <b>{view.groupBy.slice(4)}</b> cost allocation tag. Costs on
-              untagged resources appear as <i>(untagged)</i>. Cost Explorer has no native VPC dimension, so tag your NAT
+              Tag breakdowns only include resources carrying the <b>{view.groupBy.slice(4)}</b> cost allocation tag. Traffic on
+              untagged resources appears as <i>(untagged)</i>. Cost Explorer has no native VPC dimension, so tag your NAT
               gateways, load balancers and instances with their VPC to break down by VPC.
             </Alert>
           )}
@@ -257,7 +248,7 @@ export default function App() {
               <KpiCards data={data} groupLabel={groupLabel} />
               <Grid container spacing={2.5}>
                 <Grid size={{ xs: 12, lg: 8 }}>
-                  <TrendChart data={data} title={`DTO cost over time by ${groupLabel.toLowerCase()}`} />
+                  <TrendChart data={data} title={`Data volume over time by ${groupLabel.toLowerCase()}`} />
                 </Grid>
                 <Grid size={{ xs: 12, lg: 4 }}>
                   <BreakdownChart data={data} title={`Share by ${groupLabel.toLowerCase()}`} />
@@ -265,10 +256,10 @@ export default function App() {
               </Grid>
               <Grid container spacing={2.5}>
                 <Grid size={{ xs: 12, lg: 8 }}>
-                  <VolumeChart data={data} transitTypes={meta?.transit_types ?? []} />
+                  <VolumeChart data={data} directions={meta?.directions ?? {}} />
                 </Grid>
                 <Grid size={{ xs: 12, lg: 4 }}>
-                  <VolumeShareChart data={data} transitTypes={meta?.transit_types ?? []} />
+                  <VolumeShareChart data={data} directions={meta?.directions ?? {}} />
                 </Grid>
               </Grid>
               <BreakdownTable
@@ -283,7 +274,7 @@ export default function App() {
 
           {meta && meta.tag_keys.length === 0 && (
             <Typography variant="caption" color="text.secondary">
-              No cost allocation tags found. Activate tags (e.g. <code>vpc</code>) in the Billing console to break costs down by VPC or team.
+              No cost allocation tags found. Activate tags (e.g. <code>vpc</code>) in the Billing console to break data volume down by VPC or team.
             </Typography>
           )}
           {!data && !loading && !error && (
