@@ -1,6 +1,6 @@
 # DTO Explorer
 
-A web app that totals **AWS data transfer volume** (GB) in both directions for a week, a month or a custom date range: egress leaving AWS, ingress arriving in AWS, and transit inside AWS. It breaks the volume down by region, account, direction, transfer type, service, usage type, cost allocation tag (for example a VPC tag) or cost category. It reports volume only, not cost.
+A web app that totals **AWS data transfer volume** (GB) for a week, a month or a custom date range. By default it shows traffic to and from the internet: egress leaving AWS and ingress arriving in AWS. A switch adds traffic that stays on AWS's network (inter-AZ, inter-region and to CloudFront). It breaks the volume down by region, account, direction, transfer type, service, usage type, cost allocation tag (for example a VPC tag) or cost category. It reports volume only, not cost.
 
 - **Backend:** Python, FastAPI and boto3, with AWS Cost Explorer as the data source
 - **Frontend:** React 19, Vite, MUI v7 and MUI X (Charts, DataGrid, Date Pickers), with light and dark mode
@@ -22,10 +22,10 @@ A web app that totals **AWS data transfer volume** (GB) in both directions for a
 
 ## Features
 - **Periods:** weekly (Monday–Sunday) or monthly with previous/next navigation, or a custom range with presets (last 7/30/90 days, year to date, last 12 months)
-- **Headline numbers:** egress, ingress and transit volume, each with the change against the previous period of the same length, plus the top contributor
+- **Headline numbers:** internet egress and ingress volume (plus transit inside AWS when shown), each with the change against the previous period of the same length, plus the top contributor
 - **Charts and table:** stacked daily or monthly volume charts by breakdown and by transfer type, share donuts, and a sortable, searchable table with click-to-drill-down
 - **Filters:** account, region, direction and transfer type, plus drill-down filters on any dimension
-- **Other:** CSV export, shareable URLs, an [Include NAT volume](#avoiding-double-counting) switch, and a mock-data mode that needs no AWS account
+- **Other:** CSV export, shareable URLs, [Include traffic within AWS](#internet-traffic-by-default) and [Include NAT volume](#avoiding-double-counting) switches, and a mock-data mode that needs no AWS account
 
 ## Requirements
 
@@ -182,6 +182,9 @@ The app finds usage types with `GetDimensionValues`, sorts them into transfer ty
 
 AWS doesn't charge for inbound transfer from the internet or for the receiving side of inter-region transfer, but it still reports the volume, so the app counts it. Filter or break down by **Direction** to separate Out, In and Transit.
 
+### Internet traffic by default
+By default the app counts only traffic to and from the internet: Internet Out and In, and Other Out and In. Inter-AZ, Inter-Region Out, Inter-Region In and To CloudFront stay on AWS's network, so they are hidden. They are left out of the Cost Explorer query, every total and the Transfer types filter. Turn on **Include traffic within AWS** (`include_aws_internal=true`) to add them back. NAT Gateway keeps its own switch.
+
 ### Avoiding double-counting
 The same bytes can be reported under more than one usage type. Take 100 GB that goes from an instance through a NAT gateway in another AZ out to the internet. AWS reports it as:
 
@@ -201,9 +204,10 @@ Interactive docs are at `/docs` while the app is running.
 
 - `GET /api/health`: status and version
 - `GET /api/meta`: accounts, regions, tag keys, cost categories and breakdown options
-- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&include_nat_volume=false&filter=REGION=us-east-1&filter=TAG:vpc=prod`
+- `GET /api/dto/summary?period=week|month|custom&start=YYYY-MM-DD&end=YYYY-MM-DD&group_by=REGION&include_aws_internal=false&include_nat_volume=false&filter=REGION=us-east-1&filter=TAG:vpc=prod`
   - `week` and `month` take the period containing `start` (today by default). `custom` uses `start` to `end`, both inclusive.
   - `group_by`: `REGION`, `LINKED_ACCOUNT`, `SERVICE`, `DIRECTION`, `TRANSFER_TYPE`, `USAGE_TYPE`, `TAG:<key>` or `COST_CATEGORY:<name>`
+  - `include_aws_internal`: `false` (default) counts internet traffic only, `true` adds Inter-AZ, Inter-Region Out/In and To CloudFront
   - `include_nat_volume`: `false` (default) leaves NAT Gateway data processed out of every total, `true` adds it to transit
   - All figures are GB. `DIRECTION` (`Out`, `In`, `Transit`) works as a breakdown and as a filter.
   - `filter` can be repeated. Values for the same dimension are OR'd and different dimensions are AND'd. An empty tag value (`TAG:vpc=`) means untagged.

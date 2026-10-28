@@ -68,32 +68,45 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
   const prevLabel = data.previous_window ? rangeLabel(data.previous_window.start, data.previous_window.end) : '';
   const top = data.rows[0];
   const mix = Object.entries(data.by_type).filter(([, gb]) => gb > 0);
+  const internetOnly = !data.include_aws_internal;
   const tiles = [
     {
-      title: 'Egress',
+      title: internetOnly ? 'Internet egress' : 'Egress',
       gb: data.egress_gb,
       prev: data.prev_egress_gb,
-      help: 'Out: leaving AWS to the internet or crossing regions (Internet Out, Inter-Region Out, Other Out).',
+      help: internetOnly
+        ? 'Out to the internet (Internet Out, Other Out).'
+        : 'Out: leaving AWS to the internet or crossing regions (Internet Out, Inter-Region Out, Other Out).',
     },
     {
-      title: 'Ingress',
+      title: internetOnly ? 'Internet ingress' : 'Ingress',
       gb: data.ingress_gb,
       prev: data.prev_ingress_gb,
-      help: 'In: arriving from the internet or another region (Internet In, Inter-Region In, Other In). AWS does not charge for it.',
+      help: internetOnly
+        ? 'In from the internet (Internet In, Other In). AWS does not charge for it.'
+        : 'In: arriving from the internet or another region (Internet In, Inter-Region In, Other In). AWS does not charge for it.',
     },
-    {
+  ];
+  // Transit is empty while both traffic within AWS and NAT volume are left out.
+  if (data.include_aws_internal || data.include_nat_volume) {
+    const parts = [
+      ...(data.include_aws_internal ? ['Inter-AZ (counted on both sides, so about 2x the bytes moved)', 'To CloudFront'] : []),
+      ...(data.include_nat_volume ? ['NAT Gateway'] : []),
+    ];
+    tiles.push({
       title: 'Transit inside AWS',
       gb: data.transit_gb,
       prev: data.prev_transit_gb,
-      help: `Inter-AZ (billed on both sides, so about 2x the bytes moved), To CloudFront${data.include_nat_volume ? ' and NAT Gateway' : ''}. These bytes also appear under another type.`,
-    },
-  ];
+      help: `${parts.join(', ')}. These bytes also appear under another type.`,
+    });
+  }
+  const size = { xs: 12, sm: 6, lg: 12 / (tiles.length + 1) };
 
   return (
     <Stack spacing={2}>
       <Grid container spacing={2}>
         {tiles.map((t) => (
-          <Grid key={t.title} size={{ xs: 12, sm: 6, lg: 3 }}>
+          <Grid key={t.title} size={size}>
             <Kpi
               title={t.title}
               value={bytes(t.gb)}
@@ -106,7 +119,7 @@ export default function KpiCards({ data, groupLabel }: { data: Summary | null; g
             />
           </Grid>
         ))}
-        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+        <Grid size={size}>
           <Kpi
             title={`Top ${groupLabel.toLowerCase()}`}
             value={

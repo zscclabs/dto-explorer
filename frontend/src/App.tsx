@@ -32,6 +32,7 @@ import { rangeLabel } from './format';
 interface ViewState extends PeriodValue {
   groupBy: string;
   includeNatVolume: boolean;
+  includeAwsInternal: boolean;
   filters: Filters;
 }
 
@@ -52,6 +53,7 @@ function readUrl(): ViewState {
     end: p.get('end') ?? dayjs().subtract(1, 'day').format('YYYY-MM-DD'),
     groupBy: p.get('group_by') ?? 'REGION',
     includeNatVolume: p.get('include_nat_volume') === 'true',
+    includeAwsInternal: p.get('include_aws_internal') === 'true',
     filters,
   };
 }
@@ -63,6 +65,7 @@ function toQuery(s: ViewState): Query {
     end: s.period === 'custom' ? s.end : undefined,
     groupBy: s.groupBy,
     includeNatVolume: s.includeNatVolume,
+    includeAwsInternal: s.includeAwsInternal,
     filters: s.filters,
   };
 }
@@ -156,6 +159,15 @@ export default function App() {
     });
   };
 
+  // Hiding traffic within AWS also drops any transfer type filter on those types, which would otherwise match nothing.
+  const setIncludeAwsInternal = (includeAwsInternal: boolean) => {
+    const hidden = includeAwsInternal ? [] : (meta?.aws_internal_types ?? []);
+    const types = (view.filters.TRANSFER_TYPE ?? []).filter((t) => !hidden.includes(t));
+    const filters: Filters = { ...view.filters, TRANSFER_TYPE: types };
+    if (!types.length) delete filters.TRANSFER_TYPE;
+    update({ includeAwsInternal, filters });
+  };
+
   const refresh = async () => {
     await fetch('/api/cache/clear', { method: 'POST' }).catch(() => undefined);
     setReloadToken((t) => t + 1);
@@ -211,9 +223,11 @@ export default function App() {
                 meta={meta}
                 groupBy={view.groupBy}
                 includeNatVolume={view.includeNatVolume}
+                includeAwsInternal={view.includeAwsInternal}
                 filters={view.filters}
                 onGroupBy={(groupBy) => update({ groupBy })}
                 onIncludeNatVolume={(includeNatVolume) => update({ includeNatVolume })}
+                onIncludeAwsInternal={setIncludeAwsInternal}
                 onFilters={(filters) => update({ filters })}
                 valueLabel={valueLabel}
               />

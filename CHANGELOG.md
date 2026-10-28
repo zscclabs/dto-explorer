@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows
 - The app reports data transfer **volume only**. Cost, the cost-metric choice, the discounts switch, effective rate and $/GB are gone. The API no longer accepts `metric` or `include_discounts` (old links still load; the parameters are ignored), and `Summary` / `Row` no longer have cost fields. `by_type` is now GB per transfer type.
 - "Inter-Region" is renamed "Inter-Region Out".
 - CSV export columns are `gb, pct, gb_<transfer type>…`.
+- By default only internet traffic is counted. Inter-AZ, Inter-Region Out/In and To CloudFront are hidden behind an "Include traffic within AWS" switch (`include_aws_internal` API parameter, `aws_internal_types` in `/api/meta`).
 
 ### Added
 - Inbound traffic: Internet In (`*DataTransfer-In-Bytes`), Inter-Region In (`*-AWS-In-Bytes`) and Other In.

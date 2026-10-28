@@ -40,6 +40,9 @@ DIRECTION = {
     TO_CLOUDFRONT: TRANSIT,
 }
 TRANSFER_TYPES = list(DIRECTION)
+# Traffic that stays on AWS's network. Hidden unless asked for, so the default view is traffic to and from the internet.
+# NAT Gateway has its own switch (counted_gb).
+AWS_INTERNAL_TYPES = [INTER_AZ, INTER_REGION_OUT, INTER_REGION_IN, TO_CLOUDFRONT]
 
 # Usage types are "<region prefix>-<kind>", the prefix is omitted for some us-east-1 usage.
 _P = r"(?:[A-Z0-9]+-)?"
@@ -214,6 +217,7 @@ class DtoService:
         group_by: str,
         filters: dict[str, list[str]],
         include_nat_volume: bool = False,
+        include_aws_internal: bool = False,
         today: date | None = None,
     ) -> Summary:
         _validate_dimension(group_by)
@@ -222,8 +226,10 @@ class DtoService:
         except ValueError as e:
             raise DtoQueryError(str(e)) from e
 
-        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), include_nat_volume, resolved.query.end)
-        return self.cache.get_or_set(key, lambda: self._summary(period, resolved, group_by, filters, include_nat_volume))
+        key = ("summary", period, resolved.display, group_by, tuple(sorted((k, tuple(sorted(v))) for k, v in filters.items())), include_nat_volume, include_aws_internal, resolved.query.end)
+        return self.cache.get_or_set(
+            key, lambda: self._summary(period, resolved, group_by, filters, include_nat_volume, include_aws_internal)
+        )
 
     def _summary(
         self,
@@ -232,6 +238,7 @@ class DtoService:
         group_by: str,
         filters: dict[str, list[str]],
         include_nat_volume: bool,
+        include_aws_internal: bool,
     ) -> Summary:
         q = resolved.query
         result = Summary(
@@ -241,6 +248,7 @@ class DtoService:
             previous_window=None if q.is_empty else _window_out(resolved.previous),
             group_by=group_by,
             include_nat_volume=include_nat_volume,
+            include_aws_internal=include_aws_internal,
             total_gb=0.0,
             egress_gb=0.0,
             ingress_gb=0.0,
@@ -259,7 +267,7 @@ class DtoService:
         if q.is_empty:
             return result
 
-        usage_types = self._filtered_usage_types(q.start, q.end, filters)
+        usage_types = self._filtered_usage_types(q.start, q.end, filters, include_aws_internal)
         if not usage_types:
             return result
 
@@ -317,16 +325,16 @@ class DtoService:
         result.series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(series.items())]
         result.volume_series = [SeriesPoint(date=date.fromisoformat(d), values=dict(v)) for d, v in sorted(volume.items())]
 
-        prev = self._previous_by_type(resolved.previous, filters, include_nat_volume)
+        prev = self._previous_by_type(resolved.previous, filters, include_nat_volume, include_aws_internal)
         result.prev_total_gb = sum(prev.values())
         result.prev_egress_gb, result.prev_ingress_gb, result.prev_transit_gb = _by_direction(prev)
         return result
 
     def _previous_by_type(
-        self, w: periods.Window, filters: dict[str, list[str]], include_nat_volume: bool
+        self, w: periods.Window, filters: dict[str, list[str]], include_nat_volume: bool, include_aws_internal: bool
     ) -> dict[str, float]:
         """Counted GB per transfer type for the window, in one MONTHLY call grouped by usage type."""
-        usage_types = self._filtered_usage_types(w.start, w.end, filters)
+        usage_types = self._filtered_usage_types(w.start, w.end, filters, include_aws_internal)
         out: dict[str, float] = defaultdict(float)
         if not usage_types:
             return out
@@ -345,8 +353,12 @@ class DtoService:
                     out[kind] += counted_gb(kind, float(g["Metrics"]["UsageQuantity"]["Amount"]), include_nat_volume)
         return out
 
-    def _filtered_usage_types(self, start: date, end: date, filters: dict[str, list[str]]) -> dict[str, str]:
+    def _filtered_usage_types(
+        self, start: date, end: date, filters: dict[str, list[str]], include_aws_internal: bool
+    ) -> dict[str, str]:
         usage_types = self.dto_usage_types(start, end)
+        if not include_aws_internal:
+            usage_types = {u: k for u, k in usage_types.items() if k not in AWS_INTERNAL_TYPES}
         if types := filters.get("TRANSFER_TYPE"):
             usage_types = {u: k for u, k in usage_types.items() if k in types}
         if directions := filters.get("DIRECTION"):
@@ -421,6 +433,7 @@ class DtoService:
                 cost_categories=cost_categories,
                 transfer_types=TRANSFER_TYPES,
                 directions=DIRECTION,
+                aws_internal_types=AWS_INTERNAL_TYPES,
                 group_by_options=group_opts,
                 default_tag_key=None,
                 mock=self.mock,
